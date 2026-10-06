@@ -151,7 +151,10 @@ export default function App() {
           {err && err.includes('401') && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#d29922]/50 bg-[#d29922]/10 p-3 text-sm text-[#e8b93e]">
               <ShieldAlert size={15} />
-              <span>Login required — {auth?.login === 'forward' ? 'your SSO proxy must pass X-Forwarded-User.' : 'sign in with the browser prompt (local login), then reload.'}</span>
+              <span>Login required — {auth?.login === 'forward' ? 'your SSO proxy must pass X-Forwarded-User.' : auth?.login === 'oidc' ? 'sign in with your identity provider.' : 'sign in with the browser prompt (local login), then reload.'}</span>
+              {auth?.login === 'oidc' && (
+                <button onClick={() => { window.location.href = 'oidc/login'; }} className="rounded-lg bg-[#58a6ff]/20 px-2.5 py-1 text-xs font-medium text-white ring-1 ring-inset ring-[#58a6ff]/50 hover:bg-[#58a6ff]/30">Sign in with SSO</button>
+              )}
               <button onClick={() => window.location.reload()} className="ml-auto rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white ring-1 ring-inset ring-white/10 hover:bg-white/10">Reload</button>
             </div>
           )}

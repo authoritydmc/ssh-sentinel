@@ -95,7 +95,11 @@ flowchart TD
     H -->|"other"| M{"AUTH_MODE?"}
     M -->|"none"| OK2["allow: private net only"]
     M -->|"local"| BA["check HTTP Basic pbkdf2 hash"]
-    M -->|"forward or oidc"| PX{"from trusted proxy with SSO header?"}
+    M -->|"oidc"| SS["valid session cookie?"]
+    SS -->|"no, browser"| LG["redirect to SSO login"]
+    SS -->|"no, API"| D
+    SS -->|"yes"| OK3
+    M -->|"forward"| PX{"from trusted proxy with SSO header?"}
     PX -->|"yes"| OK3["allow"]
     PX -->|"no"| D["deny 401 or 403"]
     BA -->|"bad"| D
