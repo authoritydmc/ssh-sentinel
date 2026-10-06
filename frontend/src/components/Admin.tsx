@@ -15,6 +15,7 @@ import {
   type BanEntry,
   type ReportEntry,
 } from '../lib/api';
+import { maskIp, useMask } from './Mask';
 import { Badge, Card, Empty, Skeleton } from './ui';
 
 type Tab = 'bans' | 'reports' | 'activity' | 'settings';
@@ -74,6 +75,7 @@ export default function Admin() {
 function BansTab() {
   const [rows, setRows] = useState<BanEntry[] | null>(null);
   const [err, setErr] = useState('');
+  const { masked } = useMask();
   const load = useCallback(() => {
     fetchBans()
       .then(setRows)
@@ -102,7 +104,7 @@ function BansTab() {
             <tbody>
               {rows.map((b) => (
                 <tr key={b.ip} className="border-t border-[#1e2a3f]">
-                  <td className="py-1.5 pr-3 font-mono text-[#a5d6ff]">{b.ip}</td>
+                  <td className="py-1.5 pr-3 font-mono text-[#a5d6ff]">{maskIp(b.ip, masked)}</td>
                   <td className="py-1.5 pr-3">
                     <Badge tone={b.source === 'auto' ? 'warn' : 'info'}>{b.source}</Badge>
                   </td>
@@ -128,6 +130,7 @@ function BansTab() {
 
 function ReportsTab() {
   const [rows, setRows] = useState<ReportEntry[] | null>(null);
+  const { masked } = useMask();
   useEffect(() => {
     fetchReports().then(setRows).catch(() => setRows([]));
   }, []);
@@ -149,7 +152,7 @@ function ReportsTab() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={`${r.ip}-${r.provider}-${i}`} className="border-t border-[#1e2a3f]">
-                  <td className="py-1.5 pr-3 font-mono">{r.ip}</td>
+                  <td className="py-1.5 pr-3 font-mono">{maskIp(r.ip, masked)}</td>
                   <td className="py-1.5 pr-3">{r.provider}</td>
                   <td className="py-1.5 pr-3 text-xs text-[#8b98ad]">{fmtT(r.ts)}</td>
                   <td className="py-1.5">
@@ -167,6 +170,7 @@ function ReportsTab() {
 
 function ActivityTab() {
   const [rows, setRows] = useState<ActivityEntry[] | null>(null);
+  const { masked } = useMask();
   useEffect(() => {
     fetchActivity().then(setRows).catch(() => setRows([]));
   }, []);
@@ -179,7 +183,7 @@ function ActivityTab() {
           <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-black/30 px-2.5 py-1.5 text-xs">
             <span className="text-[#8b98ad]">{relT(a.ts)}</span>
             <Badge tone="dim">{a.action}</Badge>
-            {a.ip && <span className="font-mono text-[#a5d6ff]">{a.ip}</span>}
+            {a.ip && <span className="font-mono text-[#a5d6ff]">{maskIp(a.ip, masked)}</span>}
             <span className="text-[#8b98ad]">
               {a.actor} · {a.detail}
             </span>

@@ -74,12 +74,16 @@ Defaults are chosen so compromise detection never goes blind:
   `sudo`/`CRON`/`systemd` noise is dropped. `SHIP_FILTER=full` for debugging.
 - **Attacker IPs always fully visible** — no masking on failed/probe stats,
   map, tables, or log chains. No PII redaction there by design.
-- **Accepted logins always visible**, with verdict:
+- **Accepted usernames always masked**: normal `Accepted` logins show
+  `d****y`-style names in every mode. Raw names never reach the API.
   `fail-then-accept` (IP had prior fails) is always `suspicious`;
   with `TRUSTED_IPS`/`TRUSTED_USERS` set, unknown-IP/user accepts are also
   `suspicious`. Suspicious entries show **full user + full IP** + red banner.
-- `PRIVACY_MODE=strict` only masks usernames of *trusted* accepts
-  (`deploy` → `d****y`) and the `self_ips` list. Balanced (default) shows all.
+- **Screenshot-safe mask toggle** (header, off by default, remembered per
+  browser): hides IPs, usernames, host names, and session lines on every
+  page, including suspicious rows. Raw values stay in props and API calls.
+  Only rendered text is masked.
+- `PRIVACY_MODE=strict` additionally masks the `self_ips` list.
 - Set `TRUSTED_IPS` (admin/home/runner IPs) + `TRUSTED_USERS` (e.g. `ubuntu,deploy`)
   for strongest signal. Without them, only `fail-then-accept` flags.
 - Stored agent logs are `0600` plaintext JSONL capped at `MAX_LINES_PER_HOST`.
