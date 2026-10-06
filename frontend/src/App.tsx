@@ -1,7 +1,7 @@
 import {
   Activity, AlertTriangle, CheckCircle2, ChevronLeft, Crosshair, Eye, Globe2,
   LayoutDashboard, ListOrdered, Map as MapIcon, Pause, Play, Radio, Search,
-  ShieldAlert, ShieldCheck, Users,
+  Server, ShieldAlert, ShieldCheck, Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Suspense, lazy } from 'react';
@@ -12,7 +12,7 @@ const WorldMap = lazy(() => import('./components/charts').then(m => ({ default: 
 import { Badge, Card, Empty, MetricCard, Skeleton } from './components/ui';
 const AttackerModal = lazy(() => import('./components/AttackerModal'));
 import { eventTone, } from './components/ui';
-import { TZ, fetchSummary, fetchTail, fmtClock, fmtT, relT, type Summary } from './lib/api';
+import { TZ, fetchSummary, fetchTail, fmtClock, fmtT, relT, type Host, type Summary } from './lib/api';
 import { clsx } from 'clsx';
 
 type View = 'overview' | 'attackers' | 'events';
@@ -21,16 +21,19 @@ function useSummary(host: string) {
   const [data, setData] = useState<Summary | null>(null);
   const [err, setErr] = useState('');
   const [updated, setUpdated] = useState(0);
+  const [switching, setSwitching] = useState(false);
   useEffect(() => {
     let live = true;
+    // Show a subtle switching state so scope changes never look frozen.
+    setSwitching(true);
     const load = () => fetchSummary(host)
-      .then((d) => { if (live) { setData(d); setErr(''); setUpdated(Date.now()); } })
-      .catch((e) => { if (live) setErr(e.message); });
+      .then((d) => { if (live) { setData(d); setErr(''); setUpdated(Date.now()); setSwitching(false); } })
+      .catch((e) => { if (live) { setErr(e.message); setSwitching(false); } });
     load();
     const t = setInterval(load, 60000);
     return () => { live = false; clearInterval(t); };
-  }, []);
-  return { data, err, updated };
+  }, [host]);
+  return { data, err, updated, switching };
 }
 
 const NAV: { id: View; label: string; icon: React.ReactNode }[] = [
@@ -41,7 +44,7 @@ const NAV: { id: View; label: string; icon: React.ReactNode }[] = [
 
 export default function App() {
   const [host, setHost] = useState('all');
-  const { data, err, updated } = useSummary(host);
+  const { data, err, updated, switching } = useSummary(host);
   const [view, setView] = useState<View>('overview');
   const [collapsed, setCollapsed] = useState(false);
   const [modalIp, setModalIp] = useState<string | null>(null);
@@ -106,33 +109,33 @@ export default function App() {
       </aside>
 
       {/* Main */}
-      <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 border-b border-[#1e2a3f] bg-[#0a0f1c]/80 backdrop-blur-xl">
-          <div className="flex items-center gap-3 px-4 py-3 md:px-6">
-            <button className="rounded-lg p-2 hover:bg-white/10 md:hidden" onClick={() => setMobileNav(!mobileNav)} aria-label="Menu">
-              <ListOrdered size={18} />
-            </button>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">SSH Security Operations</h1>
-              <p className="text-xs text-[#8b98ad]">live from <code className="rounded bg-white/5 px-1">/var/log/auth.log</code> · {data ? `${data.total.toLocaleString()} attempts · ${data.ips} IPs` : 'connecting…'}</p>
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 border-b border-[#1e2a3f] bg-[#0a0f1c]/85 backdrop-blur-xl">
+          <div className="flex flex-col gap-3 px-4 py-3 md:px-6 lg:flex-row lg:items-center">
+            <div className="flex items-center gap-3">
+              <button className="rounded-lg p-2 hover:bg-white/10 md:hidden" onClick={() => setMobileNav(!mobileNav)} aria-label="Menu">
+                <ListOrdered size={18} />
+              </button>
+              <div>
+                <h1 className="flex items-center gap-2 text-lg font-bold tracking-tight">
+                  SSH Security Operations
+                  {switching && <span className="rounded-full bg-[#58a6ff]/15 px-2 py-0.5 text-[11px] font-medium text-[#a5d6ff] ring-1 ring-inset ring-[#58a6ff]/40">switching…</span>}
+                </h1>
+                <p className="text-xs text-[#8b98ad]">
+                  <ScopeLabel host={host} hosts={data?.hosts ?? []} data={data} />
+                </p>
+              </div>
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
-              <button onClick={() => setHost('all')}
-                className={clsx('rounded-lg px-2.5 py-1 text-xs', host === 'all' ? 'bg-[#58a6ff]/20 text-white ring-1 ring-inset ring-[#58a6ff]/50' : 'text-[#8b98ad] hover:bg-white/5')}>
-                all hosts</button>
-              {(data?.hosts ?? []).filter((h) => !h.local).map((h) => (
-                <button key={h.id} onClick={() => setHost(host === h.id ? 'all' : h.id)} title={`last seen ${relT(h.last_seen * 1000)}`}
-                  className={clsx('inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs', host === h.id ? 'bg-[#58a6ff]/20 text-white ring-1 ring-inset ring-[#58a6ff]/50' : 'text-[#8b98ad] hover:bg-white/5')}>
-                  <i className={clsx('h-1.5 w-1.5 rounded-full', h.online ? 'bg-[#3fb950] live-dot' : 'bg-[#5b6b82]')} />{h.id}</button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 text-xs text-[#8b98ad]">
-              <Eye size={13} />{updated ? `updated ${fmtClock(updated)}` : '…'}
+            <div className="flex flex-col gap-2 lg:ml-auto lg:items-end">
+              <HostScopeBar hosts={data?.hosts ?? []} active={host} onChange={setHost} />
+              <div className="flex items-center gap-2 text-xs text-[#8b98ad]">
+                <Eye size={13} />{updated ? `updated ${fmtClock(updated)}` : '…'}
+              </div>
             </div>
           </div>
         </header>
 
-        <main className="space-y-4 p-4 md:p-6">
+        <main className="flex-1 space-y-4 p-4 md:p-6">
           {err && <div className="rounded-xl border border-[#f85149]/50 bg-[#f85149]/10 p-3 text-sm text-[#ff9d97]">Backend unreachable: {err}</div>}
 
           {view === 'overview' && (
@@ -184,17 +187,116 @@ export default function App() {
           )}
 
           {view === 'events' && <EventFeed host={host} />}
+          {host !== 'all' && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#58a6ff]/30 bg-[#58a6ff]/10 px-3 py-2 text-xs text-[#a5d6ff]">
+              <Server size={13} />
+              <span>Viewing <b>{host}</b> only — metrics, attackers and events are filtered to this host.</span>
+              <button onClick={() => setHost('all')} className="ml-auto rounded-lg bg-[#58a6ff]/20 px-2.5 py-1 font-medium text-white ring-1 ring-inset ring-[#58a6ff]/50 hover:bg-[#58a6ff]/30">
+                Back to fleet
+              </button>
+            </div>
+          )}
         </main>
 
-        <footer className="flex flex-wrap gap-x-5 gap-y-1 border-t border-[#1e2a3f] px-4 py-2.5 text-xs text-[#8b98ad] md:px-6">
+        <footer className="sticky bottom-0 z-20 flex flex-wrap gap-x-5 gap-y-1 border-t border-[#1e2a3f] bg-[#0a0f1c]/92 px-4 py-2.5 text-xs text-[#8b98ad] backdrop-blur-xl md:px-6">
           <span><i className="live-dot mr-1.5 inline-block h-2 w-2 rounded-full bg-[#3fb950]" />live</span>
+          <span>scope: <b className="text-white">{host === 'all' ? `fleet (${data?.hosts?.length ?? '…'})` : host}</b></span>
           <span>geo cache: <b className="text-white">{data?.geo_cached ?? '…'}</b></span>
           <span>self excluded: <b className="text-white">{data?.excluded_self ?? '…'}</b></span>
-          <span>auto-refresh 60s</span>
+          <span className="hidden sm:inline">auto-refresh 60s</span>
           <span className="ml-auto">times in {TZ}</span>
         </footer>
       </div>
       {modalIp && <Suspense fallback={null}><AttackerModal ip={modalIp} host={host} onClose={() => setModalIp(null)} /></Suspense>}
+    </div>
+  );
+}
+
+function ScopeLabel({ host, hosts, data }: { host: string; hosts: Host[]; data: Summary | null }) {
+  const total = data ? `${data.total.toLocaleString()} attempts · ${data.ips} IPs` : 'connecting…';
+  if (host === 'all') {
+    const n = hosts.length;
+    return (
+      <span>
+        Fleet view · {n > 0 ? `${n} host${n === 1 ? '' : 's'} merged` : 'all hosts'} · live from{' '}
+        <code className="rounded bg-white/5 px-1">/var/log/auth.log</code> · {total}
+      </span>
+    );
+  }
+  const h = hosts.find((x) => x.id === host);
+  return (
+    <span>
+      Host <b className="text-white">{host}</b>
+      {h?.local ? ' · main (central)' : ' · agent'} ·{' '}
+      {h && !h.online ? <span className="text-[#e8b93e]">offline · last seen {relT(h.last_seen * 1000)}</span> : total}
+    </span>
+  );
+}
+
+function HostScopeBar({ hosts, active, onChange }: { hosts: Host[]; active: string; onChange: (h: string) => void }) {
+  // UX: always show Fleet + central/main + every agent. Never hide the main host.
+  // Sorted: central first, then online agents, then offline.
+  const sorted = useMemo(() => {
+    const arr = [...hosts];
+    arr.sort((a, b) => {
+      if (a.local !== b.local) return a.local ? -1 : 1;
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      return a.id.localeCompare(b.id);
+    });
+    return arr;
+  }, [hosts]);
+
+  if (hosts.length === 0) {
+    return <div className="flex items-center gap-1.5 text-xs text-[#5b6b82]"><Server size={13} /> discovering fleet…</div>;
+  }
+
+  const pill = (isActive: boolean) =>
+    clsx(
+      'inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-medium transition-all ring-1 ring-inset',
+      isActive
+        ? 'bg-[#58a6ff]/20 text-white ring-[#58a6ff]/50'
+        : 'bg-white/[.02] text-[#8b98ad] ring-white/10 hover:bg-white/5 hover:text-white',
+    );
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Host scope">
+      <span className="mr-0.5 inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-[#5b6b82]">
+        <Server size={12} /> scope
+      </span>
+      <button
+        role="tab"
+        aria-selected={active === 'all'}
+        onClick={() => onChange('all')}
+        title={`Merged view of all ${hosts.length} host${hosts.length === 1 ? '' : 's'}`}
+        className={pill(active === 'all')}
+      >
+        Fleet · {hosts.length}
+      </button>
+      {sorted.map((h) => {
+        const isActive = active === h.id;
+        const tip = h.local
+          ? `Main host (central) · ${h.online ? 'online' : 'offline'}`
+          : `Agent · ${h.online ? 'online' : `offline · last seen ${relT(h.last_seen * 1000)}`}${h.lines ? ` · ${h.lines.toLocaleString()} lines` : ''}`;
+        return (
+          <button
+            key={h.id}
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(isActive ? 'all' : h.id)}
+            title={tip}
+            className={pill(isActive)}
+          >
+            <i className={clsx('h-1.5 w-1.5 rounded-full', h.online ? 'bg-[#3fb950] live-dot' : 'bg-[#5b6b82]')} />
+            {h.id}
+            {h.local && (
+              <span className="rounded-full bg-[#3fb950]/15 px-1.5 py-px text-[10px] font-semibold text-[#7ee787] ring-1 ring-inset ring-[#3fb950]/40">
+                main
+              </span>
+            )}
+            {!h.online && !h.local && <span className="text-[10px] text-[#5b6b82]">offline</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
