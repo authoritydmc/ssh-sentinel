@@ -1,6 +1,7 @@
 import { Ban, Fingerprint, Flag, Globe2, Network, Radar, RefreshCw, Server, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { fetchIntel, fetchTail, fmtT, postBan, postRecon, postReport, postUnban, relT, type IpIntel, type ReconState } from '../lib/api';
+import { maskIp, maskLine, maskUser, useMask } from './Mask';
 import { Badge, eventTone } from './ui';
 
 export default function AttackerModal({ ip, host, onClose }: { ip: string; host: string; onClose: () => void }) {
@@ -43,12 +44,13 @@ export default function AttackerModal({ ip, host, onClose }: { ip: string; host:
   };
 
   const h = intel?.history;
+  const { masked } = useMask();
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="glass mx-auto my-8 max-w-3xl rounded-2xl p-6 shadow-2xl">
         <div className="mb-4 flex items-start justify-between">
           <div>
-            <h2 className="font-mono text-2xl font-bold tracking-tight">{ip}</h2>
+            <h2 className="font-mono text-2xl font-bold tracking-tight">{maskIp(ip, masked)}</h2>
             <p className="text-sm text-[#8b98ad]">
               {intel ? (<>{intel.city && `${intel.city}, `}{intel.country} · {intel.org || intel.isp || 'unknown org'}</>) : 'resolving intel…'}
             </p>
@@ -113,7 +115,7 @@ export default function AttackerModal({ ip, host, onClose }: { ip: string; host:
             ['Org / ISP', intel?.org || intel?.isp || '—'], ['ASN', intel?.as || '—'],
             ['rDNS', intel?.ptr || '—'],
             ['RDAP net', `${intel?.rdap_name || ''} ${intel?.rdap_handle || ''} ${intel?.rdap_cc || ''}`.trim() || '—'],
-            ['Tried', h?.users.map(([u, n]) => `${u} (${n})`).join(', ') || '—'],
+            ['Tried', h?.users.map(([u, n]) => `${maskUser(u, masked)} (${n})`).join(', ') || '—'],
           ].map(([k, v]) => (
             <div key={k} className="flex gap-2"><span className="w-20 shrink-0 text-[#8b98ad]">{k}</span><span className="break-all">{v}</span></div>
           ))}
@@ -156,7 +158,7 @@ export default function AttackerModal({ ip, host, onClose }: { ip: string; host:
             {chain.map((ln, i) => {
               const t = eventTone(ln);
               const cls = t === 'bad' ? 'text-[#ff9d97] border-[#f85149]' : t === 'ok' ? 'text-[#7ee787] border-[#3fb950]' : t === 'info' ? 'text-[#a5d6ff] border-transparent' : 'text-[#8b98ad] border-transparent';
-              return <div key={i} className={`border-l-2 px-2 py-px break-all ${cls}`}>{ln}</div>;
+              return <div key={i} className={`border-l-2 px-2 py-px break-all ${cls}`}>{maskLine(ln, masked)}</div>;
             })}
           </div>
         )}

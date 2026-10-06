@@ -13,10 +13,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Risk-scored public list: `abusers()` lists repeat offenders only (≥`ABUSERS_MIN_HITS`, score ≥`ABUSERS_MIN_SCORE`, auto-excluded on any successful login), each entry with risk/band/reasons, optional AbuseIPDB confidence. `ABUSERS_PUBLIC=1` opens `/api/abusers` + a public `/abusers` leaderboard without login.
 - `WHITELIST_IPS` removes admin/owner IPs from every attacker list; open `/api/self` reports each visitor's own status and the UI warns listed visitors to ask for whitelisting.
 - Fail2ban bans + auto-block + admin panel + SQLite risk store + abuse reports (issue #19): `POST /api/admin/ban|unban`, `GET /api/admin/bans|activity|reports`, `GET /api/banlist`, first-setup wizard (`POST /api/admin/setup` with one-time token), password change, ban buttons in intel modal, Admin view (bans/reports/activity/settings), hammer auto-ban loop (`BAN_AUTO`, `BAN_THRESHOLD/WINDOW`), velocity + repeat-ban risk signals, AbuseIPDB + webhook reports with per-provider throttle, `examples/fail2ban-action.conf`. Backend stays stdlib-only.
+- GHCR images now carry SLSA build provenance (`actions/attest-build-provenance`, Sigstore-signed). Verify with `gh attestation verify oci://ghcr.io/<owner>/ssh-sentinel --owner <owner>`.
+- Screenshot-safe UI: header **mask** toggle (off by default, per-browser memory) hides IPs, usernames, host names, and session lines on every page. Accepted usernames are now masked in every mode (suspicious accepts stay fully visible unless the toggle is on). The suspicious banner starts minimized when nothing changed, gains Clear/Minimize, and moved below the charts. Gallery screenshots removed.
 - Brand mark: `frontend/public/logo.svg` (shield + pulse + keyhole) used in sidebar, favicon set (SVG, ICO, PNG), Apple touch icon, README header. `scripts/make-icons.py` renders the PNGs.
 
 ### Fixed
 - `AUTH_MODE=forward` accepts Authentik `X-authentik-username` / `X-authentik-email` identity headers. The edge passes these names. Old code ignored them. All edge requests failed with 401.
+- First-setup login with a custom user failed. `AUTH_USER` defaulted to `admin` and hid the file-based user. Every setup user got 401. Env value now wins only when set.
 
 ## [0.3.0] - 2026-10-06
 
