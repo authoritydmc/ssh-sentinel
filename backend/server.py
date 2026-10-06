@@ -988,12 +988,54 @@ def _mint_pass_hash(pw):
     return "pbkdf2-sha256$200000$%s$%s" % (salt.hex(), dk.hex())
 
 
+def _repo_file(name):
+    """Find a shipped repo file: /srv/<name> in the image, repo root in dev."""
+    cands = [os.path.join("/srv", name),
+             os.path.normpath(os.path.join(
+                 os.path.dirname(os.path.abspath(__file__)), "..", name))]
+    for p in cands:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def app_version():
+    v = os.environ.get("APP_VERSION", "").strip()
+    if v and v != "dev":
+        return v
+    p = _repo_file("VERSION")
+    if p:
+        try:
+            with open(p) as f:
+                v = f.read().strip()
+            if v:
+                return v
+        except OSError:
+            pass
+    return v or "dev"
+
+
+def version_info():
+    """Open build info for the UI About dialog. No secrets."""
+    log = ""
+    p = _repo_file("CHANGELOG.md")
+    if p:
+        try:
+            with open(p, errors="replace") as f:
+                log = f.read(20480)
+        except OSError:
+            log = ""
+    return {"version": app_version(),
+            "commit": os.environ.get("GIT_COMMIT", "")[:12],
+            "changelog": log}
+
+
 def auth_status(user=None):
     login = {"none": "none", "forward": "forward", "oidc": "oidc"}.get(AUTH_MODE, "basic")
     return {"mode": AUTH_MODE, "login": login,
             "user": user or None,
             "safe": AUTH_MODE in ("local", "forward", "oidc"),
-            "version": os.environ.get("APP_VERSION", "dev"),
+            "version": app_version(),
             "abusers_public": ABUSERS_PUBLIC,
             "setup_needed": AUTH_MODE == "local" and not _local_configured()}
 
@@ -1010,7 +1052,7 @@ def health():
     except Exception:
         hosts = []
     return {"status": "ok", "uptime_s": int(time.time() - START_TS),
-            "version": os.environ.get("APP_VERSION", "dev"),
+            "version": app_version(),
             "mode": AUTH_MODE, "time": int(time.time() * 1000),
             "hosts": len(hosts),
             "hosts_online": sum(1 for h in hosts if h.get("online")),
@@ -1933,6 +1975,13 @@ class H(BaseHTTPRequestHandler):
             return self._send(json.dumps(auth_status(user)), "application/json")
         if u.path == "/api/admin/status":
             return self._send(json.dumps(admin_status()), "application/json")
+        if u.path == "/api/version":
+            # Open build info: version, commit, changelog. No secrets.
+            try:
+                return self._send(json.dumps(version_info()), "application/json")
+            except Exception as e:
+                return self._send(json.dumps({"error": type(e).__name__}),
+                                   "application/json", 500)
         if u.path == "/api/self":
             # "Is my IP flagged?" — open to all, reveals only the caller's
             # own address and its list status. Powers the UI self-check.

@@ -255,6 +255,7 @@ Same origin, no auth for reads (keep behind tailnet/SSO). Agent push requires be
 | `GET` | `/api/health` | — | open liveness snapshot: status, uptime, version, mode, hosts, log/data checks (for Uptime Kuma etc.) |
 | `GET` | `/oidc/login`, `/oidc/callback`, `/oidc/logout` | — | built-in SSO flow in `oidc` mode (302 redirects + session cookie) |
 | `GET` | `/api/auth` | — | `{mode, login, user, safe}` — lock badge source, always open |
+| `GET` | `/api/version` | — | build info: version, short commit, full changelog text. Powers the footer About dialog. Always open, no secrets |
 | `GET` | `/api/summary` | `?host=all\|<id>` | total, ips, top[25], timeline[48h], logins[60], excluded_self, hosts (login required unless `AUTH_MODE=none`) |
 | `GET` | `/api/hosts` | — | `[{id, local, last_seen, online, lines}]` (login required unless `none`) |
 | `GET` | `/api/tail` | `?q=&n=200&host=` | plain-text log slice, `n` clamped 10–2000, case-insensitive substring (login required unless `none`) |
