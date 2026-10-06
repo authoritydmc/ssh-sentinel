@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { fetchIntel, fetchTail, fmtT, postRecon, relT, type IpIntel, type ReconState } from '../lib/api';
 import { Badge, eventTone } from './ui';
 
-export default function AttackerModal({ ip, onClose }: { ip: string; onClose: () => void }) {
+export default function AttackerModal({ ip, host, onClose }: { ip: string; host: string; onClose: () => void }) {
   const [intel, setIntel] = useState<IpIntel | null>(null);
   const [err, setErr] = useState('');
   const [recon, setRecon] = useState<ReconState | null>(null);
@@ -11,9 +11,9 @@ export default function AttackerModal({ ip, onClose }: { ip: string; onClose: ()
 
   useEffect(() => {
     let live = true;
-    fetchIntel(ip).then((d) => live && setIntel(d)).catch((e) => live && setErr(e.message));
+    fetchIntel(ip, host).then((d) => live && setIntel(d)).catch((e) => live && setErr(e.message));
     return () => { live = false; };
-  }, [ip]);
+  }, [ip, host]);
 
   const pollRecon = useCallback(async (force: boolean) => {
     for (let i = 0; i < 25; i++) {
@@ -29,9 +29,10 @@ export default function AttackerModal({ ip, onClose }: { ip: string; onClose: ()
 
   useEffect(() => { pollRecon(false); }, [pollRecon]);
 
+  const _host = host;
   const loadChain = async () => {
     try {
-      const lines = await fetchTail(ip, 500);
+      const lines = await fetchTail(ip, 500, _host);
       setChain([...lines].reverse());
     } catch (e) { setChain([`chain failed: ${(e as Error).message}`]); }
   };

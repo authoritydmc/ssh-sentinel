@@ -17,13 +17,13 @@ import { clsx } from 'clsx';
 
 type View = 'overview' | 'attackers' | 'events';
 
-function useSummary() {
+function useSummary(host: string) {
   const [data, setData] = useState<Summary | null>(null);
   const [err, setErr] = useState('');
   const [updated, setUpdated] = useState(0);
   useEffect(() => {
     let live = true;
-    const load = () => fetchSummary()
+    const load = () => fetchSummary(host)
       .then((d) => { if (live) { setData(d); setErr(''); setUpdated(Date.now()); } })
       .catch((e) => { if (live) setErr(e.message); });
     load();
@@ -40,7 +40,8 @@ const NAV: { id: View; label: string; icon: React.ReactNode }[] = [
 ];
 
 export default function App() {
-  const { data, err, updated } = useSummary();
+  const [host, setHost] = useState('all');
+  const { data, err, updated } = useSummary(host);
   const [view, setView] = useState<View>('overview');
   const [collapsed, setCollapsed] = useState(false);
   const [modalIp, setModalIp] = useState<string | null>(null);
@@ -115,7 +116,17 @@ export default function App() {
               <h1 className="text-lg font-bold tracking-tight">SSH Security Operations</h1>
               <p className="text-xs text-[#8b98ad]">live from <code className="rounded bg-white/5 px-1">/var/log/auth.log</code> · {data ? `${data.total.toLocaleString()} attempts · ${data.ips} IPs` : 'connecting…'}</p>
             </div>
-            <div className="ml-auto flex items-center gap-2 text-xs text-[#8b98ad]">
+            <div className="ml-auto flex items-center gap-1.5">
+              <button onClick={() => setHost('all')}
+                className={clsx('rounded-lg px-2.5 py-1 text-xs', host === 'all' ? 'bg-[#58a6ff]/20 text-white ring-1 ring-inset ring-[#58a6ff]/50' : 'text-[#8b98ad] hover:bg-white/5')}>
+                all hosts</button>
+              {(data?.hosts ?? []).filter((h) => !h.local).map((h) => (
+                <button key={h.id} onClick={() => setHost(host === h.id ? 'all' : h.id)} title={`last seen ${relT(h.last_seen * 1000)}`}
+                  className={clsx('inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs', host === h.id ? 'bg-[#58a6ff]/20 text-white ring-1 ring-inset ring-[#58a6ff]/50' : 'text-[#8b98ad] hover:bg-white/5')}>
+                  <i className={clsx('h-1.5 w-1.5 rounded-full', h.online ? 'bg-[#3fb950] live-dot' : 'bg-[#5b6b82]')} />{h.id}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[#8b98ad]">
               <Eye size={13} />{updated ? `updated ${fmtClock(updated)}` : '…'}
             </div>
           </div>
@@ -172,7 +183,7 @@ export default function App() {
             </Card>
           )}
 
-          {view === 'events' && <EventFeed />}
+          {view === 'events' && <EventFeed host={host} />}
         </main>
 
         <footer className="flex flex-wrap gap-x-5 gap-y-1 border-t border-[#1e2a3f] px-4 py-2.5 text-xs text-[#8b98ad] md:px-6">
@@ -183,7 +194,7 @@ export default function App() {
           <span className="ml-auto">times in {TZ}</span>
         </footer>
       </div>
-      {modalIp && <Suspense fallback={null}><AttackerModal ip={modalIp} onClose={() => setModalIp(null)} /></Suspense>}
+      {modalIp && <Suspense fallback={null}><AttackerModal ip={modalIp} host={host} onClose={() => setModalIp(null)} /></Suspense>}
     </div>
   );
 }
@@ -256,7 +267,7 @@ function lineTime(ln: string): number | null {
   return null;
 }
 
-function EventFeed() {
+function EventFeed({ host }: { host: string }) {
   const [lines, setLines] = useState<string[]>([]);
   const [q, setQ] = useState('');
   const [paused, setPaused] = useState(false);
@@ -266,14 +277,14 @@ function EventFeed() {
     const load = async () => {
       if (paused) return;
       try {
-        const l = await fetchTail(q, 200);
+        const l = await fetchTail(q, 200, host);
         if (live) setLines(newestFirst ? [...l].reverse() : l);
       } catch { /* keep stale */ }
     };
     load();
     const t = setInterval(load, 15000);
     return () => { live = false; clearInterval(t); };
-  }, [q, paused, newestFirst]);
+  }, [q, paused, newestFirst, host]);
   return (
     <Card title="Live event feed" icon={<Radio size={15} className="text-[#f85149]" />}
       action={<button onClick={() => setPaused(!paused)} className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1 text-xs ring-1 ring-inset ring-white/10 hover:bg-white/10">

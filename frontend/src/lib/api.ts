@@ -11,6 +11,7 @@ export interface Summary {
   total: number; ips: number; top: TopEntry[];
   timeline: [number, number, number][]; logins: { user: string; ip: string; ts: number | null }[];
   excluded_self: number; self_ips: string[]; geo_cached: number; now: number;
+  host: string; hosts: Host[];
 }
 export interface IpIntel {
   ip: string; cc?: string; country?: string; city?: string; org?: string; isp?: string;
@@ -30,16 +31,19 @@ async function get<T>(p: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-export const fetchSummary = () => get<Summary>('summary');
-export const fetchIntel = (ip: string) => get<IpIntel>(`ipinfo?ip=${encodeURIComponent(ip)}`);
+export interface Host { id: string; local: boolean; last_seen: number; online: boolean; lines?: number }
+export const fetchHosts = () => get<Host[]>('hosts');
+const withHost = (p: string, host: string) => (host && host !== 'all' ? `${p}${p.includes('?') ? '&' : '?'}host=${encodeURIComponent(host)}` : p);
+export const fetchSummary = (host = 'all') => get<Summary>(withHost('summary', host));
+export const fetchIntel = (ip: string, host = 'all') => get<IpIntel>(withHost(`ipinfo?ip=${encodeURIComponent(ip)}`, host));
 export const postRecon = (ip: string, force = false) =>
   fetch(api(`recon?ip=${encodeURIComponent(ip)}${force ? '&force=1' : ''}`), { method: 'POST' })
     .then(async (r) => {
       if (!r.ok) throw new Error(`recon → HTTP ${r.status}`);
       return (await r.json()) as ReconState;
     });
-export const fetchTail = async (q: string, n: number): Promise<string[]> => {
-  const r = await fetch(api(`tail?q=${encodeURIComponent(q)}&n=${n}`));
+export const fetchTail = async (q: string, n: number, host = 'all'): Promise<string[]> => {
+  const r = await fetch(api(withHost(`tail?q=${encodeURIComponent(q)}&n=${n}`, host)));
   if (!r.ok) throw new Error(`tail → HTTP ${r.status}`);
   return (await r.text()).split('\n').filter((x) => x.trim() !== '');
 };

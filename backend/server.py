@@ -396,7 +396,7 @@ def read_lines(host=None):
 
 
 def summary(host=None):
-    lines = read_lines(host)
+    lines = read_lines(host or "all")
     now = datetime.now()
     mine = own_ips()
     skipped_self = 0
@@ -453,7 +453,7 @@ def summary(host=None):
             "timeline": tl, "logins": logins[-60:],
             "excluded_self": skipped_self, "self_ips": sorted(mine),
             "geo_cached": sum(1 for k in _cache if k.startswith("geo:")),
-            "now": _epoch_ms(now), "host": host or HOST_ID,
+            "now": _epoch_ms(now), "host": host or "all",
             "hosts": list_hosts()}
 
 
