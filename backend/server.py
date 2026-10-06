@@ -81,8 +81,8 @@ def list_hosts():
 GEO_CACHE = "/tmp/sshlog_geo.json"
 IP_CACHE = "/tmp/sshlog_ipcache.json"
 IP_TTL = 7 * 86400
-SPIDER = "http://dev-spiderfoot:5001"
-RECON_MODULES = "sfp_dnsresolve,sfp_whois,sfp_ipapico,sfp_abusech"
+SPIDER = os.environ.get("SPIDERFOOT_URL", "http://spiderfoot:5001").rstrip("/")
+RECON_MODULES = os.environ.get("RECON_MODULES", "sfp_dnsresolve,sfp_whois,sfp_ipapico,sfp_abusech")
 RECON_TTL = 7 * 86400
 # Event types worth showing inline (SpiderFoot result rows are
 # [ts, data, source, module, .., type, ..]; ROOT + self-echo filtered out).

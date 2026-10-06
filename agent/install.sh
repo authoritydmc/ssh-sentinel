@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Join a server to the SSH Sentinel fleet (run ON THE JOINING SERVER as root).
-# Usage: CENTRAL_URL=http://oracle1:8079 AGENT_TOKEN=<from central gentoken> sudo -E ./install.sh
+# Usage: CENTRAL_URL=http://central:8079 AGENT_TOKEN=<from central gentoken> sudo -E ./install.sh
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
-: "${CENTRAL_URL:?set CENTRAL_URL, e.g. http://oracle1:8079 (tailscale name)}"
+: "${CENTRAL_URL:?set CENTRAL_URL, e.g. http://central-tailscale-name:8079 (tailscale name)}"
 : "${AGENT_TOKEN:?set AGENT_TOKEN from central: python3 backend/server.py gentoken <host-id>}"
 AGENT_ID="${AGENT_ID:-$(hostname -s)}"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"

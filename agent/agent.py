@@ -13,7 +13,7 @@ import socket
 import time
 import urllib.request
 
-CENTRAL = os.environ.get("CENTRAL_URL", "http://oracle1:8079").rstrip("/")
+CENTRAL = os.environ.get("CENTRAL_URL", "http://central:8079").rstrip("/")
 TOKEN = os.environ.get("AGENT_TOKEN", "")
 AGENT_ID = os.environ.get("AGENT_ID", socket.gethostname().split(".")[0])
 LOG = os.environ.get("AUTH_LOG", "/var/log/auth.log")

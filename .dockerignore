@@ -1,2 +1,25 @@
+# git / ci - never in image
+.git
+.github
+.gitignore
+
+# secrets / runtime - never in image
+.env
+.env.*
+data/
+backend/data/
+*.log
+__pycache__/
+
+# frontend build inputs that are re-installed
+frontend/node_modules
+frontend/dist
 node_modules
 dist
+
+# dev-only
+.vscode
+.idea
+*.md
+!README.md
+demo/

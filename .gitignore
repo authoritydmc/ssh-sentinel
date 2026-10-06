@@ -1,6 +1,32 @@
-frontend/node_modules
-frontend/dist
-backend/data
+# deps
+frontend/node_modules/
+frontend/dist/
+
+# runtime data (tokens live here - never commit)
+backend/data/
 data/
+*.jsonl
+agents.json
+
+# env (example is committed, real values never)
 .env
+.env.*
+!.env.example
+
+# python
 __pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# logs & os
+*.log
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
