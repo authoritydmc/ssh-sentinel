@@ -1,5 +1,5 @@
 # SSH Sentinel: React SOC dashboard (built) + stdlib Python API (runtime).
-FROM node:20-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
