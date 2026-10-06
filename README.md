@@ -37,6 +37,12 @@ configures, deploys, and verifies. It obeys [`AGENTS.md`](AGENTS.md).
 | **Self-noise filter** | Container/node egress + `SELF_PUBLIC_IPS` excluded from attacker stats (count shown separately) |
 | **Ops** | Single static image, healthcheck on `/healthz`, no DB, JSON files only |
 
+## 📸 Gallery
+
+| Fleet overview + compromise banner | Attacker intel modal |
+| ---------------------------------------- | ---------------------- |
+| ![Fleet overview with metrics, suspicious-login banner, and trends](docs/screenshots/overview.png) | ![Attacker intel modal with geo, ASN, tried users, and recon](docs/screenshots/attacker-intel.png) |
+
 ## 🎯 Use cases
 
 1. **Single VPS watchtower** — see who is hammering your SSH right now, which users they want, which countries they come from.
