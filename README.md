@@ -39,13 +39,10 @@ configures, deploys, and verifies. It obeys [`AGENTS.md`](AGENTS.md).
 
 ## 📸 Gallery
 
-| Fleet overview + compromise banner | Recon findings on an attacker |
-| ---------------------------------------- | ------------------------------- |
-| ![Fleet overview with metrics, suspicious-login banner, and trends](docs/screenshots/overview.png) | ![Attacker intel modal with geo, ASN, tried users, and recon findings](docs/screenshots/recon-findings.png) |
-
-| Recon scan running |
-| ------------------ |
-| ![Attacker intel modal while a recon scan runs](docs/screenshots/recon-running.png) |
+Screenshots are omitted on purpose. Real dashboards leak usernames, IPs,
+and host names. Use the header **mask** toggle for screenshot-safe views.
+It hides IPs, usernames, host names, and session lines on every page.
+The choice persists per browser.
 
 ## 🎯 Use cases
 
