@@ -37,7 +37,7 @@ echo "[1/3] Building image..."
 docker build -t "$IMG" .
 echo "[ OK ] Built $IMG"
 
-echo "[2/4] Running with demo log (open mode)..."
+echo "[2/5] Running with demo log (open mode)..."
 docker run -d --name "$CONTAINER" -p "$HOST_PORT:8079" \
   -e HOST_ID=smoke -e AUTH_LOG=/srv/demo/auth.log.sample -e AUTH_MODE=none \
   -v "$PWD/demo/auth.log.sample:/srv/demo/auth.log.sample:ro" \
@@ -45,7 +45,7 @@ docker run -d --name "$CONTAINER" -p "$HOST_PORT:8079" \
 sleep 6
 docker logs "$CONTAINER" 2>&1 | tail -n 5 || true
 
-echo "[3/4] Health + API checks (incl. public abusers feed)..."
+echo "[3/5] Health + API checks (incl. public abusers feed)..."
 curl -s --max-time 20 -f "http://localhost:$HOST_PORT/healthz" | grep -q ok
 echo "[ OK ] /healthz -> ok"
 SUMMARY=$(curl -s --max-time 20 -f "http://localhost:$HOST_PORT/api/summary?host=all")
@@ -62,7 +62,7 @@ assert set(d['abusers'][0].keys()) <= {'ip','hits','first','last','users','attem
 print('[ OK ] /api/abusers total=%d safe-fields-only' % d['total'])
 "
 
-echo "[4/4] Local-auth gate (fail-closed default)..."
+echo "[4/5] Local-auth gate (fail-closed default)..."
 ACONTAINER="${CONTAINER}-auth"
 AHOST_PORT=$(pick_port)
 [ -z "${AHOST_PORT:-}" ] && AHOST_PORT=18080
@@ -89,5 +89,25 @@ echo "[ OK ] wrong password -> 401"
 curl -s --max-time 20 -f "http://localhost:$AHOST_PORT/api/auth" | grep -q '"local"'
 echo "[ OK ] /api/auth reports local mode"
 docker rm -f "$ACONTAINER" >/dev/null 2>&1 || true
+
+echo "[5/5] Built-in OIDC gate (unconfigured IdP fails closed)..."
+OCONTAINER="${CONTAINER}-oidc"
+OHOST_PORT=$(pick_port)
+[ -z "${OHOST_PORT:-}" ] && OHOST_PORT=18081
+docker run -d --name "$OCONTAINER" -p "$OHOST_PORT:8079" \
+  -e HOST_ID=smoke-oidc -e AUTH_LOG=/srv/demo/auth.log.sample \
+  -e AUTH_MODE=oidc \
+  -v "$PWD/demo/auth.log.sample:/srv/demo/auth.log.sample:ro" \
+  "$IMG" >/dev/null
+sleep 6
+curl -s --max-time 20 -f "http://localhost:$OHOST_PORT/api/auth" | grep -q '"oidc"'
+echo "[ OK ] /api/auth reports oidc mode"
+if curl -s --max-time 20 "http://localhost:$OHOST_PORT/api/summary?host=all" | grep -q '"total"'; then
+  echo "[FAIL] /api/summary reachable without SSO session"; exit 1
+fi
+echo "[ OK ] /api/summary -> 401 without session"
+curl -s --max-time 20 "http://localhost:$OHOST_PORT/oidc/login" | grep -q 'OIDC not configured'
+echo "[ OK ] /oidc/login reports missing OIDC_* (fail-closed)"
+docker rm -f "$OCONTAINER" >/dev/null 2>&1 || true
 
 echo "Smoke test PASSED."

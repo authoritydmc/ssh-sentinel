@@ -128,6 +128,30 @@ AUTH_ALLOWED_USERS=alice,bob@example.com   # optional allowlist
 # headers are only honored from AUTH_TRUSTED_PROXIES (spoof-safe by default)
 ```
 
+### Built-in SSO: no proxy needed (`AUTH_MODE=oidc`)
+
+Central speaks OIDC itself (authorization-code flow, RS256, server sessions).
+In Authentik, create a Provider (type OAuth2/OpenID, confidential client)
+plus an Application, and set:
+
+- Redirect URIs: `https://<your-host>/oidc/callback`
+- Signing key: any RSA key (RS256 is required)
+- Scopes: `openid email profile`
+
+```bash
+# central env
+AUTH_MODE=oidc
+OIDC_ISSUER=https://auth.example.com/application/o/ssh-sentinel/
+OIDC_CLIENT_ID=<from authentik>
+OIDC_CLIENT_SECRET=<from authentik>
+OIDC_REDIRECT_URL=https://<your-host>/oidc/callback
+AUTH_ALLOWED_USERS=alice@example.com   # optional allowlist
+```
+
+Open the UI → it redirects to Authentik → back with a session cookie
+(HttpOnly, 12h default via `OIDC_SESSION_TTL`). `/oidc/logout` ends it.
+`OIDC_COOKIE_SECURE=1` when central serves HTTPS directly.
+
 Or copy-paste ready: [`examples/sso-traefik-authentik.yml`](examples/sso-traefik-authentik.yml)
 
 ```bash
@@ -208,7 +232,7 @@ Rotate a host: `gentoken <host>` again on central, update `/etc/ssh-sentinel-age
 | **Live events** | sidebar → Live events | filter (e.g. `Accepted` or an IP), pause/resume, order toggle, 15s refresh, severity badges (attack/auth/system) |
 | **Host pills** | header | `all hosts` vs per-host, hover shows last-seen, green = online (<120s) |
 
-Legacy single-file fallback (`PAGE` in `server.py`) renders if `dist/` is missing — the React build is what ships in Docker.
+The UI is the React build in `dist/` (ships in Docker). Without `dist/`, unknown routes return `404`.
 
 ## 🔌 API reference
 
@@ -217,6 +241,8 @@ Same origin, no auth for reads (keep behind tailnet/SSO). Agent push requires be
 | Method | Path | Params | Notes |
 | ------ | ---- | ------ | ----- |
 | `GET` | `/healthz` | — | `ok` (Docker healthcheck, always open) |
+| `GET` | `/api/health` | — | open liveness snapshot: status, uptime, version, mode, hosts, log/data checks (for Uptime Kuma etc.) |
+| `GET` | `/oidc/login`, `/oidc/callback`, `/oidc/logout` | — | built-in SSO flow in `oidc` mode (302 redirects + session cookie) |
 | `GET` | `/api/auth` | — | `{mode, login, user, safe}` — lock badge source, always open |
 | `GET` | `/api/summary` | `?host=all\|<id>` | total, ips, top[25], timeline[48h], logins[60], excluded_self, hosts (login required unless `AUTH_MODE=none`) |
 | `GET` | `/api/hosts` | — | `[{id, local, last_seen, online, lines}]` (login required unless `none`) |
@@ -250,7 +276,7 @@ curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 | `PUSH_EVERY` | `10` | agent | Push interval seconds |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | central | Optional recon backend; recon endpoints error gracefully if unreachable |
 | `RECON_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_ipapico,sfp_abusech` | central | SpiderFoot module list |
-| `AUTH_MODE` | `local` | central | `local` (Basic login, fail-closed) \| `forward`/`oidc` (Authentik+Traefik ForwardAuth via `X-Forwarded-User`) \| `none` (open — private tailnet/demo only) |
+| `AUTH_MODE` | `local` | central | `local` (Basic login, fail-closed) \| `forward` (Authentik+Traefik ForwardAuth via SSO headers) \| `oidc` (built-in SSO code flow) \| `none` (open — private tailnet/demo only) |
 | `AUTH_USER` | `admin` | central | Local-login username |
 | `AUTH_PASS_HASH` | `` | central | `pbkdf2-sha256$…` from `docker exec ssh-sentinel python3 /srv/server.py genhash` (preferred over `AUTH_PASSWORD`) |
 | `AUTH_PASSWORD` | `` | central | Plaintext fallback (never logged); prefer the hash |
