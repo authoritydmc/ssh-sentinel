@@ -35,7 +35,9 @@ Read this file before you change code. Obey all rules in it.
 3. For backend behavior changes: run the server with the demo log and test
    each mode you touched (`none`, `local`, `forward`) plus `/api/abusers`.
 4. Commit with a conventional message: `feat|fix|chore|docs(scope): text`.
-5. Push to `master` and confirm `ci` + `Docker Image CI-PROD master` are green.
+5. Open a PR to `master` and write the description with
+   `skills/pr-writing/SKILL.md`.
+   Confirm `ci` + `Docker Image CI-PROD master` are green.
 6. Confirm the new Hub/GHCR tags exist before you claim success.
 
 ## 5. Git hooks
