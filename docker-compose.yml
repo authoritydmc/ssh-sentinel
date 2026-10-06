@@ -97,7 +97,7 @@ services:
   # SPIDERFOOT_PORT=5001 to bind all interfaces on a private net.
   spiderfoot:
     profiles: ["recon"]
-    image: ${SPIDERFOOT_IMAGE:-spiderfoot/spiderfoot:latest}
+    image: ${SPIDERFOOT_IMAGE:-joshuapfritz/spiderfoot:v4.0}
     container_name: ssh-sentinel-spiderfoot
     restart: unless-stopped
     expose:
@@ -105,7 +105,7 @@ services:
     ports:
       - "${SPIDERFOOT_PORT:-127.0.0.1:5001}:5001"
     volumes:
-      - spiderfoot_data:/var/lib/spiderfoot
+      - spiderfoot_data:/data
     command: python3 ./sf.py -l 0.0.0.0:5001
 
   # Agent mode: same image, ships this host's log to central. Needs a join
