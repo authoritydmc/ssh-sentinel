@@ -133,6 +133,24 @@ Use `docker compose --profile recon up -d --build`.
 Central reaches SpiderFoot at `http://spiderfoot:5001`.
 No extra network setup is needed.
 
+### 7.1. Enforcement (bans, risk store, reports)
+
+Central keeps a SQLite index at `DATA_DIR/sentinel.db`.
+Tables: `ip_stats`, `bans`, `reports`, `activity`, `kv`.
+Logs stay the source of truth. The DB is derived.
+
+Rules:
+
+- Risk adds velocity (hits per hour) and repeat-ban signals.
+- Accepted logins still clear an IP from the attacker list.
+- `POST /api/admin/ban` writes `bans`, calls `fail2ban-client`, rewrites `banlist.txt`.
+- Auto-ban runs each 60 seconds when `BAN_AUTO=1`.
+- It skips self, whitelisted, private, and accepted IPs.
+- Abuse reports send once per `REPORT_THROTTLE_DAYS` per provider.
+- Payloads carry IP, hits, and risk only. No logins. No host names.
+- Every ban, unban, report, and setup writes an `activity` row.
+- Admin APIs need login. `/api/admin/status` is open and leaks no secrets.
+
 ## 8. Deployments
 
 ### 8.1. One server
