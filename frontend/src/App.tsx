@@ -91,9 +91,8 @@ export default function App() {
         collapsed ? 'w-16' : 'w-60', mobileNav ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
       )}>
         <div className="flex items-center gap-2.5 border-b border-[#1e2a3f] p-4">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#f85149] to-[#a40e26] shadow-lg shadow-[#f85149]/25">
-            <ShieldAlert size={18} className="text-white" />
-          </span>
+          <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="SSH Sentinel logo"
+            className="h-9 w-9 shrink-0 rounded-xl shadow-lg shadow-[#f85149]/25" />
           {!collapsed && <div><div className="text-sm font-bold tracking-tight">SSH Sentinel</div>
             <div className="flex items-center gap-1 text-[11px] text-[#3fb950]"><span className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-[#3fb950]" />live · {TZ}</div></div>}
         </div>

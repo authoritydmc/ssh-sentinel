@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="SSH Sentinel logo">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16233a"/>
+      <stop offset="1" stop-color="#0a0f1c"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff7b72"/>
+      <stop offset="1" stop-color="#a40e26"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#tile)" stroke="#2c3f58" stroke-width="4"/>
+  <path d="M128 40 L188 62 V128 C188 172 160 200 128 216 C96 200 68 172 68 128 V62 Z"
+        fill="#f85149" fill-opacity="0.12" stroke="url(#shield)" stroke-width="13" stroke-linejoin="round"/>
+  <polyline points="88,128 108,128 118,104 136,152 148,128 168,128"
+        fill="none" stroke="#3fb950" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <circle cx="128" cy="168" r="11" fill="#a5d6ff"/>
+  <path d="M123 176 L133 176 L137 196 L119 196 Z" fill="#a5d6ff"/>
+</svg>

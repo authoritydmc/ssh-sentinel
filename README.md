@@ -1,4 +1,4 @@
-# 🛡️ SSH Sentinel — multi-server SSH attack intel (SOC dashboard)
+# <img src="frontend/public/logo.svg" width="40" align="left" alt="SSH Sentinel logo"> SSH Sentinel — multi-server SSH attack intel (SOC dashboard)
 
 Central React dashboard + stdlib-only Python API + lightweight log-shipper agents.
 Modelled on **Beszel** (hub/agent) and **Dozzle** (distributed logs): agents **push**

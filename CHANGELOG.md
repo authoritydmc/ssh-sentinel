@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Built-in SSO (`AUTH_MODE=oidc`): authorization-code flow against any OIDC provider (Authentik tested pattern), RS256 ID-token verify, server sessions, `/oidc/logout`, UI "Sign in with SSO" button. Covered by `scripts/selftest_oidc.py` (RFC 7515 vector, runs in CI).
 - Open `/api/health` for uptime monitors (status, uptime, version, mode, hosts, log/data checks); `/healthz` stays plain `ok`.
 - Removed the legacy single-file `PAGE` fallback (React `dist/` is the only UI; missing build returns `404`).
+- Brand mark: `frontend/public/logo.svg` (shield + pulse + keyhole) used in sidebar, favicon set (SVG, ICO, PNG), Apple touch icon, README header. `scripts/make-icons.py` renders the PNGs.
 
 ### Fixed
 - `AUTH_MODE=forward` accepts Authentik `X-authentik-username` / `X-authentik-email` identity headers. The edge passes these names. Old code ignored them. All edge requests failed with 401.
