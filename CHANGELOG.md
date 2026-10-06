@@ -10,6 +10,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Open `/api/health` for uptime monitors (status, uptime, version, mode, hosts, log/data checks); `/healthz` stays plain `ok`.
 - Removed the legacy single-file `PAGE` fallback (React `dist/` is the only UI; missing build returns `404`).
 
+### Fixed
+- `AUTH_MODE=forward` accepts Authentik `X-authentik-username` / `X-authentik-email` identity headers. The edge passes these names. Old code ignored them. All edge requests failed with 401.
+
 ## [0.3.0] - 2026-10-06
 
 ### Added
