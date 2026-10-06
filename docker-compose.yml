@@ -1,0 +1,44 @@
+name: ssh-sentinel
+
+services:
+  central:
+    build: .
+    image: rajlabs/ssh-sentinel:latest
+    container_name: ssh-sentinel
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8079}:8079"
+    environment:
+      HOST_ID: ${HOST_ID:-central}
+      SELF_PUBLIC_IPS: ${SELF_PUBLIC_IPS:-}
+      AUTH_LOG: ${AUTH_LOG:-/var/log/auth.log}
+      DATA_DIR: /srv/data
+    volumes:
+      - sentinel_data:/srv/data
+      # Production: live host log. Demo profile overrides with the sample file.
+      - /var/log/auth.log:/var/log/auth.log:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8079/healthz >/dev/null || python3 -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8079/healthz').read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Demo mode: same image, sample log, no host log mount.
+  #   docker compose --profile demo up --build
+  demo:
+    profiles: ["demo"]
+    build: .
+    image: rajlabs/ssh-sentinel:latest
+    container_name: ssh-sentinel-demo
+    ports:
+      - "${DEMO_PORT:-8081}:8079"
+    environment:
+      HOST_ID: demo-fleet
+      AUTH_LOG: /srv/demo/auth.log.sample
+      DATA_DIR: /tmp/sentinel-demo
+    volumes:
+      - ./demo/auth.log.sample:/srv/demo/auth.log.sample:ro
+
+volumes:
+  sentinel_data:
