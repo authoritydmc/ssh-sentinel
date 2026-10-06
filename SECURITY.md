@@ -27,6 +27,16 @@ SSH Sentinel is designed to run on a **private tailnet or localhost**:
   Rotate with `docker exec ssh-sentinel python3 /srv/server.py gentoken <host>`.
 - **Never expose port 8079 directly to the internet.** Put SSO in front
   (Tailscale Serve, Cloudflare Access, Authelia, Traefik + Authentik).
+- **Login modes** (`AUTH_MODE`, default `local` fail-closed): `local` = HTTP Basic
+  against `AUTH_USER` + `AUTH_PASS_HASH` (mint with `server.py genhash`) or
+  `AUTH_PASSWORD`; `forward`/`oidc` = trust `X-Forwarded-User` from
+  Authentik-via-Traefik ForwardAuth with optional `AUTH_ALLOWED_USERS`;
+  `none` = explicit open mode for private networks/demo only. `/healthz` and
+  `/api/auth` stay open; agent push keeps its own per-host Bearer tokens.
+- **`/api/abusers`** exposes attacker IPs only (hits, first/last, attempted
+  users, geo/org/ASN) — accepted logins, hostnames, internal/self IPs and raw
+  lines can never appear. Still gated by login unless `AUTH_MODE=none`;
+  paginated, cached 60s, rate-limited per client IP.
 - Treat `AGENT_TOKEN` like a password: pass via env / secret store,
   never commit to git, never paste in screenshots.
 - `SELF_PUBLIC_IPS` excludes your own scanners/VPN egress from attacker stats.
@@ -37,3 +47,26 @@ SSH Sentinel is designed to run on a **private tailnet or localhost**:
 - This repo contains **no credentials, private keys, or customer data**.
   Gate checks: `.env` is git-ignored, only `.env.example` is committed,
   `data/` is git-ignored, tokens are generated at runtime via `secrets.token_urlsafe`.
+
+## Auth-log privacy (no blind masking)
+
+`auth.log` contains more than attacker IPs: `Accepted` lines enumerate real
+accounts + admin source IPs, and `sudo` lines leak `PWD`/`COMMAND` args.
+Defaults are chosen so compromise detection never goes blind:
+
+- **Allowlist at ingest** (`SHIP_FILTER=sshd-only`, default on agent + central):
+  only `sshd` + `pam_unix(sshd:session)` lines are shipped/stored/served.
+  `sudo`/`CRON`/`systemd` noise is dropped. `SHIP_FILTER=full` for debugging.
+- **Attacker IPs always fully visible** — no masking on failed/probe stats,
+  map, tables, or log chains. No PII redaction there by design.
+- **Accepted logins always visible**, with verdict:
+  `fail-then-accept` (IP had prior fails) is always `suspicious`;
+  with `TRUSTED_IPS`/`TRUSTED_USERS` set, unknown-IP/user accepts are also
+  `suspicious`. Suspicious entries show **full user + full IP** + red banner.
+- `PRIVACY_MODE=strict` only masks usernames of *trusted* accepts
+  (`deploy` → `d****y`) and the `self_ips` list. Balanced (default) shows all.
+- Set `TRUSTED_IPS` (admin/home/runner IPs) + `TRUSTED_USERS` (e.g. `ubuntu,deploy`)
+  for strongest signal. Without them, only `fail-then-accept` flags.
+- Stored agent logs are `0600` plaintext JSONL capped at `MAX_LINES_PER_HOST`.
+  After enabling filtering, purge old noise:
+  `docker exec ssh-sentinel python3 /srv/server.py scrub`.

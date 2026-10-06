@@ -85,9 +85,35 @@ curl -s localhost:8079/healthz  # -> ok
 
 ```bash
 git clone https://github.com/authoritydmc/ssh-sentinel.git && cd ssh-sentinel
-cp .env.example .env   # set HOST_ID + SELF_PUBLIC_IPS
+cp .env.example .env   # set HOST_ID + SELF_PUBLIC_IPS + AUTH_* login
 docker compose up -d --build
-# open http://localhost:8079
+# open http://localhost:8079 (image default AUTH_MODE=local is fail-closed:
+# set AUTH_USER + AUTH_PASS_HASH in .env, or AUTH_MODE=none on a private net)
+```
+
+Mint a local-login hash (never commit the password or hash):
+
+```bash
+docker exec -it ssh-sentinel python3 /srv/server.py genhash
+# -> AUTH_PASS_HASH=pbkdf2-sha256$200000$...   (paste into .env, compose up -d)
+```
+
+Behind Authentik + Traefik instead (same ForwardAuth pattern as Dozzle):
+
+```yaml
+# central labels (illustrative) — Authentik decides who gets in,
+# central trusts the passed identity in AUTH_MODE=forward/oidc
+labels:
+  - "traefik.http.routers.ssh.middlewares=authentik@docker"
+  - "traefik.http.middlewares.authentik.forwardauth.address=http://authentik:9000/outpost.goauthentik.io/auth/traefik"
+  - "traefik.http.middlewares.authentik.forwardauth.trustForwardHeader=true"
+  - "traefik.http.middlewares.authentik.forwardauth.authResponseHeaders=X-Forwarded-User,X-Forwarded-Email"
+```
+
+```bash
+# central env for that setup
+AUTH_MODE=forward
+AUTH_ALLOWED_USERS=alice,bob@example.com   # optional allowlist
 ```
 
 ### Option C — demo (any machine, 2 min, no real logs)
@@ -150,12 +176,14 @@ Same origin, no auth for reads (keep behind tailnet/SSO). Agent push requires be
 
 | Method | Path | Params | Notes |
 | ------ | ---- | ------ | ----- |
-| `GET` | `/healthz` | — | `ok` (Docker healthcheck) |
-| `GET` | `/api/summary` | `?host=all\|<id>` | total, ips, top[25], timeline[48h], logins[60], excluded_self, hosts |
-| `GET` | `/api/hosts` | — | `[{id, local, last_seen, online, lines}]` |
-| `GET` | `/api/tail` | `?q=&n=200&host=` | plain-text log slice, `n` clamped 10–2000, case-insensitive substring |
-| `GET` | `/api/ipinfo` | `?ip=&host=` | geo + rdap + rDNS + `history{users,hits,first,last,timeline}` |
-| `POST` | `/api/recon` | `?ip=&force=` | SpiderFoot scan orchestration; `cached\|started\|running\|done\|error` (poll). `400` for private IPs / unreachable SpiderFoot |
+| `GET` | `/healthz` | — | `ok` (Docker healthcheck, always open) |
+| `GET` | `/api/auth` | — | `{mode, login, user, safe}` — lock badge source, always open |
+| `GET` | `/api/summary` | `?host=all\|<id>` | total, ips, top[25], timeline[48h], logins[60], excluded_self, hosts (login required unless `AUTH_MODE=none`) |
+| `GET` | `/api/hosts` | — | `[{id, local, last_seen, online, lines}]` (login required unless `none`) |
+| `GET` | `/api/tail` | `?q=&n=200&host=` | plain-text log slice, `n` clamped 10–2000, case-insensitive substring (login required unless `none`) |
+| `GET` | `/api/ipinfo` | `?ip=&host=` | geo + rdap + rDNS + `history{users,hits,first,last,timeline}` (login required unless `none`) |
+| `GET` | `/api/abusers` | `?host=&page=&per_page=` | **public-safe** attacker feed: ip, hits, first/last, attempted users, geo/org/ASN, flag. Paginated (≤200/page), cached 60s, rate-limited (`ABUSERS_RPM`, default 60/min/IP, `429` + `Retry-After`). **Never** exposes accepted logins, hostnames, internal/self IPs, or raw lines. Behind the login gate unless `AUTH_MODE=none` — expose intentionally (separate port/route) if you want it public |
+| `POST` | `/api/recon` | `?ip=&force=` | SpiderFoot scan orchestration; `cached\|started\|running\|done\|error` (poll). `400` for private IPs / unreachable SpiderFoot (login required unless `none`) |
 | `POST` | `/api/agent/push` | `Authorization: Bearer <token>` + `{"host","lines":[]}` | max 5000 lines/req, 2000 chars/line, capped at 60k lines/host |
 
 Examples:
@@ -182,6 +210,13 @@ curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 | `PUSH_EVERY` | `10` | agent | Push interval seconds |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | central | Optional recon backend; recon endpoints error gracefully if unreachable |
 | `RECON_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_ipapico,sfp_abusech` | central | SpiderFoot module list |
+| `AUTH_MODE` | `local` | central | `local` (Basic login, fail-closed) \| `forward`/`oidc` (Authentik+Traefik ForwardAuth via `X-Forwarded-User`) \| `none` (open — private tailnet/demo only) |
+| `AUTH_USER` | `admin` | central | Local-login username |
+| `AUTH_PASS_HASH` | `` | central | `pbkdf2-sha256$…` from `docker exec ssh-sentinel python3 /srv/server.py genhash` (preferred over `AUTH_PASSWORD`) |
+| `AUTH_PASSWORD` | `` | central | Plaintext fallback (never logged); prefer the hash |
+| `AUTH_ALLOWED_USERS` | `` | central | Optional allowlist for forward mode, e.g. `alice,bob@example.com` |
+| `ABUSERS_RPM` | `60` | central | `/api/abusers` per-client-IP requests/minute (`429` past budget) |
+| `TLS_CERT` / `TLS_KEY` | `` | central | Container paths to PEM cert/key — enables in-repo TLS 1.3-only listener (else terminate at Tailscale/Traefik) |
 
 Files:
 
@@ -198,9 +233,13 @@ Files:
 
 Read [`SECURITY.md`](SECURITY.md) before exposing anything.
 
+- Login is **fail-closed by default** (`AUTH_MODE=local`): UI + read APIs need HTTP Basic (`AUTH_USER` + `AUTH_PASS_HASH`/`AUTH_PASSWORD`); `/healthz` and `/api/auth` stay open. No credential configured → deny-all with a setup hint.
+- `AUTH_MODE=forward`/`oidc` trusts `X-Forwarded-User` from Authentik-via-Traefik ForwardAuth (Dozzle-oidc pattern); optional `AUTH_ALLOWED_USERS` allowlist; else `403`.
+- `AUTH_MODE=none` is the explicit open flag for private tailnet/demo only.
 - Agents push outbound only (no inbound ports on members).
-- Bearer per-host tokens in `data/agents.json` (`0600`); Tailscale gives WireGuard identity + encryption.
+- Bearer per-host tokens in `data/agents.json` (`0600`); Tailscale gives WireGuard identity + encryption. Optional in-repo TLS 1.3-only listener via `TLS_CERT`/`TLS_KEY`; agent `CENTRAL_URL=https://…` already verifies with system roots.
 - **Never expose 8079 publicly without SSO in front** (Tailscale Serve / Cloudflare Access / Authelia).
+- `/api/abusers` is safe-fields-only by construction (no accepted logins, hostnames, internal/self IPs, or raw lines) but stays behind the login gate unless you expose it intentionally — it is paginated, cached 60s, and rate-limited (`ABUSERS_RPM`, `429` + `Retry-After`).
 - `.env` and `data/` are git-ignored; only `.env.example` ships. Tokens are runtime-minted via `secrets.token_urlsafe(32)`.
 - Demo log is 100% synthetic (`demo/gen_auth_log.py`, seeded) — safe to share screenshots.
 

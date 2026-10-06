@@ -7,9 +7,14 @@ export interface TopEntry {
   country: string; city: string; org: string; lat: number | null; lon: number | null;
   recon: { state: string; count: number };
 }
+export interface LoginEntry {
+  user: string; user_display: string; ip: string; ts: number | null;
+  suspicious: boolean; trusted: boolean; reason: string;
+}
 export interface Summary {
   total: number; ips: number; top: TopEntry[];
-  timeline: [number, number, number][]; logins: { user: string; ip: string; ts: number | null }[];
+  timeline: [number, number, number][]; logins: LoginEntry[];
+  suspicious_count: number; privacy_mode: string; trusted_configured: boolean;
   excluded_self: number; self_ips: string[]; geo_cached: number; now: number;
   host: string; hosts: Host[];
 }
@@ -33,6 +38,8 @@ async function get<T>(p: string): Promise<T> {
 
 export interface Host { id: string; local: boolean; last_seen: number; online: boolean; lines?: number }
 export const fetchHosts = () => get<Host[]>('hosts');
+export interface AuthInfo { mode: string; login: string; user: string | null; safe: boolean }
+export const fetchAuth = () => get<AuthInfo>('auth');
 const withHost = (p: string, host: string) => (host && host !== 'all' ? `${p}${p.includes('?') ? '&' : '?'}host=${encodeURIComponent(host)}` : p);
 export const fetchSummary = (host = 'all') => get<Summary>(withHost('summary', host));
 export const fetchIntel = (ip: string, host = 'all') => get<IpIntel>(withHost(`ipinfo?ip=${encodeURIComponent(ip)}`, host));

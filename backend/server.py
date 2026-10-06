@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """SSH/auth security dashboard. Localhost only; SSO enforced by Traefik."""
+import base64
+import binascii
+import hashlib
 import html
 import ipaddress
 import json
@@ -19,8 +22,147 @@ DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspa
 HOSTS_DIR = os.path.join(DATA_DIR, "hosts")
 AGENTS_FILE = os.path.join(DATA_DIR, "agents.json")
 HOST_ID = os.environ.get("HOST_ID", socket.gethostname().split(".")[0])
-MAX_LINES_PER_HOST = 60000
+try:
+    MAX_LINES_PER_HOST = max(1000, int(os.environ.get("MAX_LINES_PER_HOST", "60000")))
+except ValueError:
+    MAX_LINES_PER_HOST = 60000
+# Privacy / redaction config.
+# SHIP_FILTER: sshd-only (default) keeps sshd + pam_unix(sshd:session) lines,
+#   drops sudo/CRON/systemd noise that leaks cwd/commands. Use "full" for debug.
+# PRIVACY_MODE: balanced (default) shows attacker IPs + ALL Accepted logins fully.
+#   strict additionally masks usernames of *trusted* accepts and self-IP list.
+#   Suspicious accepts are NEVER masked (compromise must stay visible).
+# TRUSTED_IPS/TRUSTED_USERS: your admin IPs + service accounts. Any Accepted
+#   login from an unknown IP/user, or after prior fails, is flagged suspicious.
+SHIP_FILTER = os.environ.get("SHIP_FILTER", "sshd-only").strip().lower()
+PRIVACY_MODE = os.environ.get("PRIVACY_MODE", "balanced").strip().lower()
+if PRIVACY_MODE not in ("balanced", "strict", "off"):
+    PRIVACY_MODE = "balanced"
+
+
+def _csv_env(name):
+    return {p.strip() for p in os.environ.get(name, "").split(",") if p.strip()}
+
+
+TRUSTED_IPS = _csv_env("TRUSTED_IPS")
+TRUSTED_USERS = _csv_env("TRUSTED_USERS")
 import hmac as _hmac  # noqa: E402
+
+# --- access control -----------------------------------------------------
+# AUTH_MODE=local (default, fail-closed) | forward | oidc | none.
+#   local:   HTTP Basic, single user from AUTH_USER + AUTH_PASS_HASH
+#            (preferred; mint via `server.py genhash`) or AUTH_PASSWORD.
+#            No credential configured -> deny-all with a setup hint.
+#   forward: trust reverse-proxy OIDC/ForwardAuth identity headers
+#            (Authentik via Traefik, same pattern as Dozzle dozzle-oidc):
+#            X-Forwarded-User (or X-Forwarded-Email / Remote-User).
+#            Optional AUTH_ALLOWED_USERS allowlist (csv, user or mail prefix).
+#   oidc:    alias of forward (OIDC terminates at Authentik, not here).
+#   none:    explicit open mode for private tailnet/demo only. Never default.
+AUTH_MODE = os.environ.get("AUTH_MODE", "local").strip().lower()
+if AUTH_MODE == "oidc":
+    AUTH_MODE = "forward"
+if AUTH_MODE not in ("local", "forward", "none"):
+    AUTH_MODE = "local"
+AUTH_USER = os.environ.get("AUTH_USER", "admin").strip() or "admin"
+AUTH_PASS_HASH = os.environ.get("AUTH_PASS_HASH", "").strip()
+_AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
+AUTH_ALLOWED_USERS = {p.strip() for p in os.environ.get("AUTH_ALLOWED_USERS", "").split(",") if p.strip()}
+FWD_USER_HEADERS = ("X-Forwarded-User", "X-Forwarded-Email", "Remote-User")
+# Public abusers feed: per-client RPM budget (in-memory, per process).
+try:
+    ABUSERS_RPM = max(1, int(os.environ.get("ABUSERS_RPM", "60")))
+except ValueError:
+    ABUSERS_RPM = 60
+ABUSERS_TTL = 60
+# Optional in-repo TLS (TLS 1.3 only). Off unless both point at files.
+# Preferred fleet path stays: Tailscale cert on central + https CENTRAL_URL.
+TLS_CERT = os.environ.get("TLS_CERT", "").strip()
+TLS_KEY = os.environ.get("TLS_KEY", "").strip()
+
+
+def _parse_pass_hash(s):
+    """Parse AUTH_PASS_HASH: pbkdf2-sha256$<iter>$<salt-hex>$<hash-hex>."""
+    try:
+        algo, it, salt, hh = s.split("$")
+        if algo != "pbkdf2-sha256":
+            return None
+        return (int(it), bytes.fromhex(salt), bytes.fromhex(hh))
+    except (ValueError, TypeError):
+        return None
+
+
+def _verify_local_password(pw):
+    if AUTH_PASS_HASH:
+        p = _parse_pass_hash(AUTH_PASS_HASH)
+        if not p:
+            return False
+        it, salt, expect = p
+        try:
+            got = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, it)
+        except (ValueError, OverflowError):
+            return False
+        return _hmac.compare_digest(got, expect)
+    if _AUTH_PASSWORD:
+        return bool(pw) and _hmac.compare_digest(pw, _AUTH_PASSWORD)
+    return False
+
+
+def auth_status(user=None):
+    return {"mode": AUTH_MODE,
+            "login": "none" if AUTH_MODE == "none" else ("forward" if AUTH_MODE == "forward" else "basic"),
+            "user": user or None,
+            "safe": AUTH_MODE in ("local", "forward")}
+
+
+def mask_user(u):
+    """Mask a trusted username for strict mode: deploy -> d****y."""
+    if not u or len(u) <= 2:
+        return "***"
+    return u[0] + "****" + u[-1]
+
+
+def mask_ip(ip):
+    """Mask last octet/hextet for display: 1.2.3.4 -> 1.2.3.*."""
+    try:
+        if "." in ip:
+            parts = ip.split(".")
+            if len(parts) == 4:
+                return ".".join(parts[:3]) + ".*"
+        if ":" in ip:
+            parts = ip.split(":")
+            return ":".join(parts[:-1]) + ":*"
+    except Exception:
+        pass
+    return "***"
+
+
+def is_sshd_line(ln):
+    """True for lines we keep in sshd-only mode (auth signal, no sudo leakage)."""
+    if PRIVACY_MODE == "off" or SHIP_FILTER == "full":
+        return True
+    l = ln.lower()
+    # Keep sshd core events + sshd session open/close. Drop sudo COMMAND/PWD,
+    # CRON, systemd-logind, polkit, etc.
+    if "sshd" in l:
+        return True
+    if "pam_unix(sshd" in l:
+        return True
+    return False
+
+
+def sanitize_line(ln):
+    """Redact command args / cwd if a non-sshd line slips through (full mode)."""
+    if PRIVACY_MODE == "off":
+        return ln
+    # sudo leaks: TTY, PWD, COMMAND with args (may contain secrets).
+    ln = re.sub(r"PWD=\S+", "PWD=<redacted>", ln)
+    ln = re.sub(r"TTY=\S+", "TTY=<redacted>", ln)
+    # Keep binary name, redact args: COMMAND=/usr/bin/x args... -> COMMAND=/usr/bin/x <args-redacted>
+    def _cmd(m):
+        return m.group(1) + " <args-redacted>"
+    ln = re.sub(r"(COMMAND=\S+).*?(;|$)", _cmd, ln)
+    return ln
 
 
 def _agents():
@@ -45,9 +187,22 @@ def host_lines_path(host):
 def store_pushed_lines(host, lines):
     os.makedirs(HOSTS_DIR, exist_ok=True)
     p = host_lines_path(host)
+    # Defense in depth: re-apply allowlist server-side (old agents may send full logs).
+    kept = []
+    for raw in lines[:5000]:
+        s = str(raw)[:2000]
+        if not is_sshd_line(s):
+            continue
+        kept.append(sanitize_line(s))
+    # If filtering removed everything but input was non-empty, keep nothing
+    # (prevents sudo-only pushes from creating noise). Fall through to meta update.
     with open(p, "a") as f:
-        for ln in lines[:5000]:
+        for ln in kept:
             f.write((ln if ln.endswith("\n") else ln + "\n"))
+    try:
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
     try:
         with open(p) as f:
             all_lines = f.readlines()
@@ -395,6 +550,28 @@ def read_lines(host=None):
         return []
 
 
+def classify_accept(user, ip, failed_ips, mine):
+    """Decide if an Accepted login is suspicious. Suspicious accepts are NEVER
+    masked — a brute-forcer that guesses correctly must stay fully visible.
+
+    Rules:
+    - fail-then-accept: this IP already appears in failed/probe stats -> suspicious.
+    - unknown-ip: TRUSTED_IPS is configured and ip not in it (and not self) -> suspicious.
+    - unknown-user: TRUSTED_USERS is configured and user not in it -> suspicious.
+    Without TRUSTED_* configured, only fail-then-accept flags (zero-config safe).
+    Attacker IPs are always shown fully — no PII masking there.
+    """
+    reasons = []
+    if ip in failed_ips:
+        reasons.append("fail-then-accept")
+    if TRUSTED_IPS and ip not in TRUSTED_IPS and ip not in mine:
+        reasons.append("unknown-ip")
+    if TRUSTED_USERS and user not in TRUSTED_USERS:
+        reasons.append("unknown-user")
+    suspicious = bool(reasons)
+    return suspicious, "+".join(reasons), (not suspicious)
+
+
 def summary(host=None):
     lines = read_lines(host or "all")
     now = datetime.now()
@@ -433,6 +610,19 @@ def summary(host=None):
                 ok_hours[_hour_ms(ts)] += 1
             logins.append({"user": m.group(1), "ip": m.group(2),
                            "ts": _epoch_ms(ts) if ts else None})
+    # Second pass: flag suspicious accepts now that failed-IP set is complete.
+    failed_ips = set(per_ip.keys())
+    enriched = []
+    for e in logins:
+        suspicious, reason, trusted = classify_accept(e["user"], e["ip"], failed_ips, mine)
+        display = e["user"]
+        if PRIVACY_MODE == "strict" and trusted and not suspicious:
+            display = mask_user(e["user"])
+        enriched.append({"user": e["user"], "user_display": display,
+                         "ip": e["ip"], "ts": e["ts"],
+                         "suspicious": suspicious, "trusted": trusted,
+                         "reason": reason})
+    logins = enriched
     cc = {ip: _cache.get("geo:" + ip, {}) for ip in per_ip}
     top = []
     for (u, ip), c in pair_counts.most_common(25):
@@ -449,12 +639,89 @@ def summary(host=None):
     for i in range(47, -1, -1):
         h = _hour_ms(now - timedelta(hours=i))
         tl.append([h, hours.get(h, 0), ok_hours.get(h, 0)])
+    strict = (PRIVACY_MODE == "strict")
+    self_ips_out = [mask_ip(ip) for ip in sorted(mine)] if strict else sorted(mine)
     return {"total": sum(per_ip.values()), "ips": len(per_ip), "top": top,
             "timeline": tl, "logins": logins[-60:],
-            "excluded_self": skipped_self, "self_ips": sorted(mine),
+            "suspicious_count": sum(1 for e in logins if e.get("suspicious")),
+            "privacy_mode": PRIVACY_MODE,
+            "trusted_configured": bool(TRUSTED_IPS or TRUSTED_USERS),
+            "excluded_self": skipped_self, "self_ips": self_ips_out,
             "geo_cached": sum(1 for k in _cache if k.startswith("geo:")),
             "now": _epoch_ms(now), "host": host or "all",
             "hosts": list_hosts()}
+
+
+_abusers_cache = {"ts": 0.0, "host": None, "entries": []}
+_abusers_hits = {}
+
+
+def _abusers_limited(client):
+    now = time.time()
+    arr = [t for t in _abusers_hits.get(client, []) if now - t < 60]
+    arr.append(now)
+    _abusers_hits[client] = arr[-(ABUSERS_RPM + 20):]
+    return len(arr) > ABUSERS_RPM
+
+
+def abusers(host=None):
+    """Public-safe attacker feed: failed/probe-derived IPs only.
+
+    NEVER exposes accepted logins, hostnames, internal/self IPs, or raw
+    log lines — only attacker IP, hit counts, attempted users, first/last
+    seen, and geo/org/ASN enrichment. Cached ABUSERS_TTL seconds.
+    """
+    host = host or "all"
+    now_t = time.time()
+    if (_abusers_cache["host"] == host and _abusers_cache["entries"]
+            and now_t - _abusers_cache["ts"] < ABUSERS_TTL):
+        return _abusers_cache["entries"]
+    lines = read_lines(host)
+    now = datetime.now()
+    mine = own_ips()
+    per_ip = Counter()
+    users = defaultdict(Counter)
+    first = {}
+    last = {}
+    for ln in lines:
+        grp = None
+        m = FAIL_RE.search(ln) or INVALID_RE.search(ln)
+        if m:
+            grp = (m.group(1), m.group(2))
+        else:
+            m2 = CLOSED_RE.search(ln) or DISC_RE.search(ln)
+            if m2 and is_public_ip(m2.group(1)):
+                grp = ("?", m2.group(1))
+        if not grp:
+            continue
+        u, ip = grp
+        if ip in mine or not is_public_ip(ip):
+            continue
+        per_ip[ip] += 1
+        users[ip][u] += 1
+        ts = parse_ts(ln, now)
+        if ts:
+            e = _epoch_ms(ts)
+            if ip not in first or e < first[ip]:
+                first[ip] = e
+            if ip not in last or e > last[ip]:
+                last[ip] = e
+    geo_lookup([ip for ip, _ in per_ip.most_common(200)])
+    entries = []
+    for ip, hits in per_ip.most_common(500):
+        g = _cache.get("geo:" + ip, {})
+        top_users = users[ip].most_common(5)
+        entries.append({
+            "ip": ip, "hits": hits,
+            "first": first.get(ip), "last": last.get(ip),
+            "users": [{"user": u, "hits": c} for u, c in top_users],
+            "attempted_users": [u for u, _ in top_users],
+            "cc": g.get("cc", ""), "country": g.get("country", ""),
+            "city": g.get("city", ""), "org": g.get("org", "") or g.get("isp", ""),
+            "asn": g.get("as", ""), "lat": g.get("lat"), "lon": g.get("lon"),
+            "flag": flag(g.get("cc", ""))})
+    _abusers_cache.update({"ts": now_t, "host": host, "entries": entries})
+    return entries
 
 
 def ip_history(ip, lines=None, host=None):
@@ -945,21 +1212,123 @@ class H(BaseHTTPRequestHandler):
                 return f.read(), "text/html; charset=utf-8"
         return None
 
-    def _send(self, body, ctype="text/html; charset=utf-8", code=200):
+    def _send(self, body, ctype="text/html; charset=utf-8", code=200, headers=None):
         if isinstance(body, str):
             body = body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _basic_user(self):
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Basic "):
+            return ""
+        try:
+            creds = base64.b64decode(auth[6:].strip()).decode("utf-8", "replace")
+        except (ValueError, binascii.Error):
+            return ""
+        user, _, pw = creds.partition(":")
+        if not user or not pw or user != AUTH_USER:
+            return ""
+        return user if _verify_local_password(pw) else ""
+
+    def _forward_user(self):
+        for h in FWD_USER_HEADERS:
+            v = (self.headers.get(h, "") or "").strip()
+            if v:
+                return v
+        return ""
+
+    def _gate(self):
+        """UI/API gate. Returns (user, None) or (None, (code, msg))."""
+        if AUTH_MODE == "none":
+            return None, None
+        if AUTH_MODE == "forward":
+            u = self._forward_user()
+            if not u:
+                return None, (401, "missing X-Forwarded-User: ForwardAuth (Authentik) "
+                                   "must pass an authenticated user")
+            if AUTH_ALLOWED_USERS and u not in AUTH_ALLOWED_USERS \
+                    and u.split("@")[0] not in AUTH_ALLOWED_USERS:
+                return None, (403, "user not allowed")
+            return u, None
+        u = self._basic_user()
+        if not u:
+            if not (AUTH_PASS_HASH or _AUTH_PASSWORD):
+                return None, (401, "local login enabled but no credential configured: "
+                                   "set AUTH_USER + AUTH_PASS_HASH (`server.py genhash`) "
+                                   "or AUTH_PASSWORD — or AUTH_MODE=none on a private "
+                                   "network only")
+            return None, (401, "login required")
+        return u, None
+
+    def _deny(self, gate):
+        code, msg = gate
+        body = json.dumps({"error": msg, "mode": AUTH_MODE})
+        if AUTH_MODE == "local" and code == 401:
+            return self._send(body, "application/json", 401,
+                              {"WWW-Authenticate": 'Basic realm="ssh-sentinel"'})
+        return self._send(body, "application/json", code)
 
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/healthz":
             return self._send(b"ok", "text/plain")
+        if u.path == "/api/auth":
+            user, _ = self._gate() if AUTH_MODE != "none" else (None, None)
+            if AUTH_MODE != "none" and user is None:
+                # Report mode without leaking identity; UI uses this for the lock badge.
+                return self._send(json.dumps(auth_status()), "application/json")
+            return self._send(json.dumps(auth_status(user)), "application/json")
+        if u.path == "/api/abusers":
+            # Public feed by design (safe fields only) but still behind the
+            # UI gate unless intentionally exposed: keep gate first so
+            # AUTH_MODE=local/forward deployments stay private by default.
+            user, gate = self._gate()
+            if gate is not None:
+                return self._deny(gate)
+            client = (self.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip() \
+                or self.client_address[0]
+            if _abusers_limited(client):
+                return self._send(json.dumps({"error": "rate limited"}),
+                                    "application/json", 429, {"Retry-After": "60"})
+            try:
+                page = max(1, min(1000, int(q.get("page", ["1"])[0])))
+            except ValueError:
+                page = 1
+            try:
+                per = max(1, min(200, int(q.get("per_page", [q.get("per", ["50"])[0]])[0])))
+            except ValueError:
+                per = 50
+            host = (q.get("host", [""])[0] or "")[:64] or None
+            try:
+                entries = abusers(host)
+            except Exception as e:
+                return self._send(json.dumps({"error": type(e).__name__}),
+                                   "application/json", 500)
+            total = len(entries)
+            start = (page - 1) * per
+            return self._send(json.dumps({
+                "abusers": entries[start:start + per],
+                "page": page, "per_page": per, "total": total,
+                "pages": (total + per - 1) // per if per else 0,
+                "host": host or "all", "now": int(time.time() * 1000)}),
+                "application/json")
+        user, gate = self._gate()
+        if gate is not None:
+            # Browsers hitting the SPA get the native login prompt in local mode.
+            if AUTH_MODE == "local" and gate[0] == 401 and self.path.split("?")[0] not in (
+                    "/api/summary", "/api/hosts", "/api/ipinfo", "/api/tail"):
+                return self._send("<h1>401 login required</h1>", "text/html", 401,
+                                  {"WWW-Authenticate": 'Basic realm="ssh-sentinel"'})
+            return self._deny(gate)
+        self._auth_user = user
         if u.path == "/api/summary":
             try:
                 host = (q.get("host", [""])[0] or "")[:64] or None
@@ -986,8 +1355,22 @@ class H(BaseHTTPRequestHandler):
                 n = 200
             host = (q.get("host", [""])[0] or "")[:64] or None
             lines = read_lines(host)
-            out = [ln for ln in lines if filt in ln.lower()]
-            return self._send("".join(out[-n:]), "text/plain")
+            # Privacy: drop non-sshd noise (sudo/CRON leak cwd/commands),
+            # sanitize the rest. Attacker IPs + Accepted lines stay fully
+            # visible — compromise detection must not be masked.
+            cleaned = []
+            dropped = 0
+            for ln in lines:
+                if not is_sshd_line(ln):
+                    dropped += 1
+                    continue
+                cleaned.append(sanitize_line(ln))
+            out = [ln for ln in cleaned if filt in ln.lower()]
+            body = "".join(out[-n:])
+            if dropped and not filt:
+                body = ("# note: %d non-sshd lines hidden by SHIP_FILTER=sshd-only "
+                        "(sudo/CRON noise). Use SHIP_FILTER=full to debug.\n" % dropped) + body
+            return self._send(body, "text/plain")
         # React SPA (dist/) when built, else legacy single-file page.
         hit = self.serve_dist(u.path)
         if hit is not None:
@@ -1001,6 +1384,9 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/api/recon":
+            _, gate = self._gate()
+            if gate is not None:
+                return self._deny(gate)
             ip = (q.get("ip", [""])[0] or "")[:45]
             if not is_public_ip(ip):
                 return self._send('{"error":"not a public IP"}', "application/json", 400)
@@ -1051,6 +1437,65 @@ if __name__ == "__main__":
         print("central=%s (tailscale URL of this host)" % os.environ.get("CENTRAL_URL", "http://<this-host>:8079"))
         _sys.exit(0)
 
+    if len(_sys.argv) >= 2 and _sys.argv[1] == "genhash":
+        # Mint AUTH_PASS_HASH for local login: `server.py genhash`
+        # (prompts securely) or `server.py genhash <password>` (warns: shell history).
+        import getpass as _gp
+        import secrets as _sec
+        if len(_sys.argv) >= 3:
+            print("warning: password on the command line lands in shell history; "
+                  "prefer bare `server.py genhash` for the hidden prompt.")
+            pw = _sys.argv[2]
+        else:
+            pw = _gp.getpass("new UI password: ")
+            if pw != _gp.getpass("repeat UI password: "):
+                print("mismatch; aborting.")
+                _sys.exit(1)
+        if not pw:
+            print("empty password; aborting.")
+            _sys.exit(1)
+        salt = _sec.token_bytes(16)
+        dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 200000)
+        print("AUTH_PASS_HASH=pbkdf2-sha256$200000$%s$%s"
+              % (salt.hex(), dk.hex()))
+        print("(set AUTH_USER=%s + this hash; never commit either)" % AUTH_USER)
+        _sys.exit(0)
+
+    if len(_sys.argv) >= 2 and _sys.argv[1] == "scrub":
+        # Rewrite stored agent logs through the sshd-only allowlist +
+        # sanitize. Use after enabling privacy to purge old sudo/CRON lines:
+        #   docker exec ssh-sentinel python3 /srv/server.py scrub
+        total_kept, total_dropped = 0, 0
+        if os.path.isdir(HOSTS_DIR):
+            for fn in sorted(os.listdir(HOSTS_DIR)):
+                if not fn.endswith(".jsonl"):
+                    continue
+                p = os.path.join(HOSTS_DIR, fn)
+                try:
+                    with open(p, errors="replace") as f:
+                        src = f.readlines()
+                except OSError as e:
+                    print("skip %s: %s" % (fn, e))
+                    continue
+                kept = [sanitize_line(ln) for ln in src if is_sshd_line(ln)]
+                dropped = len(src) - len(kept)
+                try:
+                    with open(p, "w") as f:
+                        f.writelines(kept[-MAX_LINES_PER_HOST:])
+                    os.chmod(p, 0o600)
+                    with open(p + ".meta", "w") as f:
+                        json.dump({"host": fn[:-6], "last_seen": time.time(),
+                                   "lines": len(kept[-MAX_LINES_PER_HOST:])}, f)
+                except OSError as e:
+                    print("write %s failed: %s" % (fn, e))
+                    continue
+                total_kept += len(kept)
+                total_dropped += dropped
+                print("%s: kept %d, dropped %d" % (fn, len(kept), dropped))
+        print("done: kept %d, dropped %d (mode=%s filter=%s)" % (
+            total_kept, total_dropped, PRIVACY_MODE, SHIP_FILTER))
+        _sys.exit(0)
+
     def _geo_prime():
         """Keep geo cache warm for current attacker IPs (summary reads cache)."""
         try:
@@ -1071,4 +1516,22 @@ if __name__ == "__main__":
             time.sleep(600)
 
     threading.Thread(target=_geo_loop, daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", 8079), H).serve_forever()
+    if AUTH_MODE == "none":
+        print("auth: MODE=none (open) — keep 8079 on tailnet/localhost or behind SSO; "
+              "set AUTH_MODE=local|forward for login", flush=True)
+    elif AUTH_MODE == "forward":
+        print("auth: MODE=forward (ForwardAuth/OIDC via X-Forwarded-User%s)" % (
+            " allowlist=%d" % len(AUTH_ALLOWED_USERS) if AUTH_ALLOWED_USERS else ""), flush=True)
+    else:
+        print("auth: MODE=local user=%s creds=%s" % (
+            AUTH_USER, "configured" if (AUTH_PASS_HASH or _AUTH_PASSWORD) else "MISSING (deny-all)"),
+            flush=True)
+    httpd = ThreadingHTTPServer(("0.0.0.0", 8079), H)
+    if TLS_CERT and TLS_KEY:
+        import ssl as _ssl
+        _ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        _ctx.minimum_version = _ssl.TLSVersion.TLSv1_3
+        _ctx.load_cert_chain(TLS_CERT, TLS_KEY)
+        httpd.socket = _ctx.wrap_socket(httpd.socket, server_side=True)
+        print("tls: 1.3-only on :8079 (cert %s)" % TLS_CERT, flush=True)
+    httpd.serve_forever()

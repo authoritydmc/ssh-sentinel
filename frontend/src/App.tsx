@@ -12,7 +12,7 @@ const WorldMap = lazy(() => import('./components/charts').then(m => ({ default: 
 import { Badge, Card, Empty, MetricCard, Skeleton } from './components/ui';
 const AttackerModal = lazy(() => import('./components/AttackerModal'));
 import { eventTone, } from './components/ui';
-import { TZ, fetchSummary, fetchTail, fmtClock, fmtT, relT, type Host, type Summary } from './lib/api';
+import { TZ, fetchAuth, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type Summary } from './lib/api';
 import { clsx } from 'clsx';
 
 type View = 'overview' | 'attackers' | 'events';
@@ -49,6 +49,12 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [modalIp, setModalIp] = useState<string | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
+  const [auth, setAuth] = useState<AuthInfo | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchAuth().then((a) => { if (live) setAuth(a); }).catch(() => { /* banner covers it */ });
+    return () => { live = false; };
+  }, []);
 
   const stats = useMemo(() => {
     if (!data) return null;
@@ -136,7 +142,14 @@ export default function App() {
         </header>
 
         <main className="flex-1 space-y-4 p-4 md:p-6">
-          {err && <div className="rounded-xl border border-[#f85149]/50 bg-[#f85149]/10 p-3 text-sm text-[#ff9d97]">Backend unreachable: {err}</div>}
+          {err && err.includes('401') && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#d29922]/50 bg-[#d29922]/10 p-3 text-sm text-[#e8b93e]">
+              <ShieldAlert size={15} />
+              <span>Login required — {auth?.login === 'forward' ? 'your SSO proxy must pass X-Forwarded-User.' : 'sign in with the browser prompt (local login), then reload.'}</span>
+              <button onClick={() => window.location.reload()} className="ml-auto rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white ring-1 ring-inset ring-white/10 hover:bg-white/10">Reload</button>
+            </div>
+          )}
+          {err && !err.includes('401') && <div className="rounded-xl border border-[#f85149]/50 bg-[#f85149]/10 p-3 text-sm text-[#ff9d97]">Backend unreachable: {err}</div>}
 
           {view === 'overview' && (
             <>
@@ -144,12 +157,19 @@ export default function App() {
                 <>
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                     <MetricCard icon={<AlertTriangle size={16} />} label="Failed attempts" value={data.total.toLocaleString()} sub={`+${data.excluded_self.toLocaleString()} self excluded`} tone="bad" />
-                    <MetricCard icon={<Globe2 size={16} />} label="Attacker IPs" value={data.ips} sub={`${data.geo_cached} geo-located`} tone="acc" />
-                    <MetricCard icon={<CheckCircle2 size={16} />} label="Successful logins" value={data.logins.length} sub="last 60 in range" tone="ok" />
+                    <MetricCard icon={<Globe2 size={16} />} label="Attacker IPs" value={data.ips} sub={`${data.geo_cached} geo-located · always full IP`} tone="acc" />
+                    <MetricCard icon={<CheckCircle2 size={16} />} label="Successful logins" value={data.logins.length} sub={(data.suspicious_count ?? 0) > 0 ? `${data.suspicious_count} SUSPICIOUS — review` : 'last 60 in range · all visible'} tone={(data.suspicious_count ?? 0) > 0 ? 'bad' : 'ok'} />
                     <MetricCard icon={<Activity size={16} />} label="Peak hour" value={`${stats!.peak[1]}/h`} sub="48h window" tone="warn" />
                     <MetricCard icon={<MapIcon size={16} />} label="Top origin" value={stats!.topcc[0]} sub={`${stats!.topcc[1]} hits`} tone="acc" />
                     <MetricCard icon={<Users size={16} />} label="Most wanted" value={stats!.topuser[0]} sub={`${stats!.topuser[1]} tries`} tone="bad" />
                   </div>
+                  {(data.suspicious_count ?? 0) > 0 && <SuspiciousBanner logins={data.logins} onIp={setModalIp} />}
+                  {!data.trusted_configured && (
+                    <div className="flex items-center gap-2 rounded-xl border border-[#e8b93e]/30 bg-[#e8b93e]/10 px-3 py-2 text-xs text-[#e8b93e]">
+                      <ShieldAlert size={13} />
+                      <span>Compromise detection is basic: only <b>fail-then-accept</b> is flagged. Set <code>TRUSTED_IPS</code>/<code>TRUSTED_USERS</code> on central to also flag unknown-IP/user accepts.</span>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                     <Card title="SSH activity trends" icon={<Activity size={15} className="text-[#f85149]" />} className="xl:col-span-2"
                       action={<span className="flex gap-3 text-xs text-[#8b98ad]"><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#f85149]" />failed<i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#3fb950]" />accepted</span>}>
@@ -174,6 +194,9 @@ export default function App() {
                   <Card title="Top attackers" icon={<Crosshair size={15} className="text-[#f85149]" />}
                     action={<button onClick={() => setView('attackers')} className="text-xs text-[#58a6ff] hover:underline">view all →</button>}>
                     <AttackerTable rows={data.top.slice(0, 8)} onIp={setModalIp} />
+                  </Card>
+                  <Card title="Recent logins (Accepted — never masked when suspicious)" icon={<CheckCircle2 size={15} className="text-[#3fb950]" />}>
+                    <LoginTable logins={data.logins} onIp={setModalIp} />
                   </Card>
                 </>
               )}
@@ -200,6 +223,9 @@ export default function App() {
 
         <footer className="sticky bottom-0 z-20 flex flex-wrap gap-x-5 gap-y-1 border-t border-[#1e2a3f] bg-[#0a0f1c]/92 px-4 py-2.5 text-xs text-[#8b98ad] backdrop-blur-xl md:px-6">
           <span><i className="live-dot mr-1.5 inline-block h-2 w-2 rounded-full bg-[#3fb950]" />live</span>
+          <span title={auth ? `auth mode: ${auth.mode} (login: ${auth.login})${auth.user ? ` · ${auth.user}` : ''}` : 'auth mode: …'}>
+            {auth && auth.safe ? '🔒' : '🔓'} {auth?.mode ?? '…'}
+          </span>
           <span>scope: <b className="text-white">{host === 'all' ? `fleet (${data?.hosts?.length ?? '…'})` : host}</b></span>
           <span>geo cache: <b className="text-white">{data?.geo_cached ?? '…'}</b></span>
           <span>self excluded: <b className="text-white">{data?.excluded_self ?? '…'}</b></span>
@@ -418,7 +444,58 @@ function EventFeed({ host }: { host: string }) {
         })}
         {lines.length === 0 && <Empty>No matching lines.</Empty>}
       </div>
-      <p className="mt-2 text-xs text-[#8b98ad]">auto-refresh 15s · times in {TZ} · {fmtT(Date.now())}</p>
+      <p className="mt-2 text-xs text-[#8b98ad]">sshd-only feed (sudo/CRON hidden) · auto-refresh 15s · times in {TZ} · {fmtT(Date.now())}</p>
     </Card>
+  );
+}
+
+function SuspiciousBanner({ logins, onIp }: { logins: Summary['logins']; onIp: (ip: string) => void }) {
+  const bad = logins.filter((l) => l.suspicious).slice(-10).reverse();
+  if (bad.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-[#f85149]/50 bg-[#f85149]/10 p-3">
+      <div className="mb-2 flex items-center gap-2 text-sm font-bold text-[#ff9d97]">
+        <ShieldAlert size={16} /> {bad.length} suspicious Accepted login{bad.length === 1 ? '' : 's'} — possible compromise, full IP/user shown
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <tbody>
+            {bad.map((l, i) => (
+              <tr key={i} className="border-t border-[#f85149]/20">
+                <td className="py-1.5 pr-3"><Badge tone="bad">{l.reason || 'suspicious'}</Badge></td>
+                <td className="py-1.5 pr-3 font-mono text-white">{l.user_display || l.user}</td>
+                <td className="py-1.5 pr-3 font-mono"><button onClick={() => onIp(l.ip)} className="text-[#a5d6ff] hover:underline">{l.ip}</button></td>
+                <td className="py-1.5 text-xs text-[#8b98ad]">{l.ts ? fmtT(l.ts) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function LoginTable({ logins, onIp }: { logins: Summary['logins']; onIp: (ip: string) => void }) {
+  const rows = [...logins].reverse().slice(0, 10);
+  if (rows.length === 0) return <Empty>No successful logins in range.</Empty>;
+  return (
+    <div className="scroll-thin overflow-x-auto">
+      <table className="w-full min-w-[560px] text-sm">
+        <thead><tr className="text-left text-xs text-[#8b98ad]">
+          <th className="pb-2 pr-3 font-medium">User</th><th className="pb-2 pr-3 font-medium">IP (always full)</th>
+          <th className="pb-2 pr-3 font-medium">Time</th><th className="pb-2 font-medium">Verdict</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((l, i) => (
+            <tr key={i} className="border-t border-[#1e2a3f]">
+              <td className="py-1.5 pr-3 font-mono">{l.user_display || l.user}</td>
+              <td className="py-1.5 pr-3 font-mono"><button onClick={() => onIp(l.ip)} className="text-[#a5d6ff] hover:underline">{l.ip}</button></td>
+              <td className="py-1.5 pr-3 text-xs text-[#8b98ad]">{l.ts ? fmtT(l.ts) : '—'}</td>
+              <td className="py-1.5">{l.suspicious ? <Badge tone="bad">⚠ {l.reason}</Badge> : <Badge tone="ok">trusted</Badge>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
