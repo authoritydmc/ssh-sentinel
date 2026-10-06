@@ -23,16 +23,17 @@ TODAY=$(date +%F)
 # 1) VERSION file
 printf '%s\n' "$VER" > VERSION
 
-# 2) CHANGELOG: Unreleased -> versioned, keep a fresh Unreleased stub
+# 2) CHANGELOG: move the Unreleased body under a versioned heading,
+# keep a fresh Unreleased stub (file starts with a title preamble).
 python3 - "$VER" "$TODAY" <<'PY'
 import sys
 ver, today = sys.argv[1], sys.argv[2]
 src = open("CHANGELOG.md").read()
 old = "## [Unreleased]\n"
-assert src.startswith(old), "CHANGELOG must start with '## [Unreleased]'"
-rest = src[len(old):]
+assert old in src, "CHANGELOG lacks an '## [Unreleased]' section"
+head, rest = src.split(old, 1)
 open("CHANGELOG.md", "w").write(
-    "## [Unreleased]\n\n## [%s] - %s\n%s" % (ver, today, rest))
+    head + "## [Unreleased]\n\n## [%s] - %s\n%s" % (ver, today, rest))
 PY
 
 git add VERSION CHANGELOG.md
