@@ -14,6 +14,15 @@ over your tailnet, central aggregates. No database, no dependencies at runtime.
 agent (any server) --tailscale+bearer--> central (main server) --> UI
 ```
 
+## 🤖 AI install (fastest path)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/authoritydmc/ssh-sentinel/master/scripts/ai-install.sh | bash
+```
+
+Then paste the prompt from [`AI.md`](AI.md) into your AI. The AI clones,
+configures, deploys, and verifies. It obeys [`AGENTS.md`](AGENTS.md).
+
 ## ✨ Features
 
 | Area | What you get |
