@@ -127,6 +127,12 @@ flowchart TD
 The webhook contract is small: send `{"ip": "1.2.3.4"}`,
 receive `{"findings": [{"type": "...", "data": "...", "module": "..."}]}`.
 
+SpiderFoot runs as an optional compose profile.
+Start central plus SpiderFoot with one command.
+Use `docker compose --profile recon up -d --build`.
+Central reaches SpiderFoot at `http://spiderfoot:5001`.
+No extra network setup is needed.
+
 ## 8. Deployments
 
 ### 8.1. One server

@@ -178,6 +178,10 @@ Other SSO front doors that work with `AUTH_MODE=forward` (no code changes):
 Click any IP → **Recon** auto-enriches via `RECON_PROVIDER`:
 
 - `spiderfoot` (default): needs a reachable `SPIDERFOOT_URL`; tune with `RECON_MODULES`. Unreachable backend → clean `error` state, never blocks the UI.
+  Start the bundled backend with `docker compose --profile recon up -d --build`.
+  Central then uses `http://spiderfoot:5001` automatically.
+  The SpiderFoot UI binds loopback only (`SPIDERFOOT_PORT`).
+  SpiderFoot has no login, so keep it private.
 - `webhook`: plug **any** probing service — POST `{"ip": "1.2.3.4"}` to `RECON_WEBHOOK_URL` (optional `RECON_WEBHOOK_TOKEN` bearer), return `{"findings": [{"type": "ASN", "data": "AS…", "module": "my-source"}]}`. Accepts `eventType`/`finding`/`value`/`info` and `source`/`provider` aliases. Results cached 7d like SpiderFoot scans.
 - `none`: recon section reports disabled (no external calls at all).
 
