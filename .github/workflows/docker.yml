@@ -20,7 +20,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     steps:
       - name: Set image name
         run: echo "IMAGE_NAME=ssh-sentinel" >> $GITHUB_ENV
