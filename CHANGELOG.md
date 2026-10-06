@@ -10,6 +10,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Built-in SSO (`AUTH_MODE=oidc`): authorization-code flow against any OIDC provider (Authentik tested pattern), RS256 ID-token verify, server sessions, `/oidc/logout`, UI "Sign in with SSO" button. Covered by `scripts/selftest_oidc.py` (RFC 7515 vector, runs in CI).
 - Open `/api/health` for uptime monitors (status, uptime, version, mode, hosts, log/data checks); `/healthz` stays plain `ok`.
 - Removed the legacy single-file `PAGE` fallback (React `dist/` is the only UI; missing build returns `404`).
+- Risk-scored public list: `abusers()` lists repeat offenders only (≥`ABUSERS_MIN_HITS`, score ≥`ABUSERS_MIN_SCORE`, auto-excluded on any successful login), each entry with risk/band/reasons, optional AbuseIPDB confidence. `ABUSERS_PUBLIC=1` opens `/api/abusers` + a public `/abusers` leaderboard without login.
+- `WHITELIST_IPS` removes admin/owner IPs from every attacker list; open `/api/self` reports each visitor's own status and the UI warns listed visitors to ask for whitelisting.
+- Fail2ban bans + auto-block + admin panel + SQLite risk store + abuse reports (issue #19): `POST /api/admin/ban|unban`, `GET /api/admin/bans|activity|reports`, `GET /api/banlist`, first-setup wizard (`POST /api/admin/setup` with one-time token), password change, ban buttons in intel modal, Admin view (bans/reports/activity/settings), hammer auto-ban loop (`BAN_AUTO`, `BAN_THRESHOLD/WINDOW`), velocity + repeat-ban risk signals, AbuseIPDB + webhook reports with per-provider throttle, `examples/fail2ban-action.conf`. Backend stays stdlib-only.
 - Brand mark: `frontend/public/logo.svg` (shield + pulse + keyhole) used in sidebar, favicon set (SVG, ICO, PNG), Apple touch icon, README header. `scripts/make-icons.py` renders the PNGs.
 
 ### Fixed

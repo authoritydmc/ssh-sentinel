@@ -6,6 +6,9 @@ frontend/dist/
 backend/data/
 data/
 *.jsonl
+*.db
+*.db-wal
+*.db-shm
 agents.json
 
 # env (example is committed, real values never)

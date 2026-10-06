@@ -262,7 +262,19 @@ Same origin, no auth for reads (keep behind tailnet/SSO). Agent push requires be
 | `GET` | `/api/hosts` | — | `[{id, local, last_seen, online, lines}]` (login required unless `none`) |
 | `GET` | `/api/tail` | `?q=&n=200&host=` | plain-text log slice, `n` clamped 10–2000, case-insensitive substring (login required unless `none`) |
 | `GET` | `/api/ipinfo` | `?ip=&host=` | geo + rdap + rDNS + `history{users,hits,first,last,timeline}` (login required unless `none`) |
-| `GET` | `/api/abusers` | `?host=&page=&per_page=` | **public-safe** attacker feed: ip, hits, first/last, attempted users, geo/org/ASN, flag. Paginated (≤200/page), cached 60s, rate-limited (`ABUSERS_RPM`, default 60/min/IP, `429` + `Retry-After`). **Never** exposes accepted logins, hostnames, internal/self IPs, or raw lines. Behind the login gate unless `AUTH_MODE=none` — expose intentionally (separate port/route) if you want it public |
+| `GET` | `/api/abusers` | `?host=&page=&per_page=` | **public-safe** attacker feed: ip, hits, first/last, attempted users, geo/org/ASN, **risk + band + reasons**. Repeat offenders only (≥`ABUSERS_MIN_HITS` fails, score ≥`ABUSERS_MIN_SCORE`, no successful login, never whitelisted/private). Paginated (≤200/page), cached 60s, rate-limited (`ABUSERS_RPM`, `429` + `Retry-After`). **Never** exposes accepted logins, hostnames, internal/self IPs, or raw lines. Behind the login gate unless `ABUSERS_PUBLIC=1` (or `AUTH_MODE=none`) |
+| `GET` | `/abusers` | — | public leaderboard page (same safe data, no login) — works only with `ABUSERS_PUBLIC=1`, else `404` |
+| `GET` | `/api/self` | — | open self-check: your IP, list status, risk, whitelist state. The UI shows a red banner when your IP is listed ("ask the admin to whitelist you") |
+| `GET` | `/api/admin/status` | — | open setup status: `setup_needed`, ban/report flags. No secrets |
+| `GET` | `/api/admin/bans` | — | active bans: ip, jail, reason, source, expiry (login required) |
+| `GET` | `/api/banlist` | — | plain-text banned IPs, one per line (login required; same host can read `banlist.txt` directly) |
+| `GET` | `/api/admin/activity` | `?limit=` | latest admin actions: bans, unbans, reports, setups (login required) |
+| `GET` | `/api/admin/reports` | — | abuse-report history per IP and provider (login required) |
+| `POST` | `/api/admin/ban` | `{"ip","reason"}` | ban an IP (fail2ban + DB + banlist). `400` for bad/private/whitelisted IPs |
+| `POST` | `/api/admin/unban` | `{"ip"}` | remove a ban |
+| `POST` | `/api/admin/setup` | `{"token","user","password"}` | first-setup only: creates the admin login. `410` after setup closes |
+| `POST` | `/api/admin/password` | `{"old","new"}` | change the file-based admin password (local mode only) |
+| `POST` | `/api/admin/report` | `{"ip","hits","risk","band"}` | report one IP now (throttled per provider) |
 | `POST` | `/api/recon` | `?ip=&force=` | SpiderFoot scan orchestration; `cached\|started\|running\|done\|error` (poll). `400` for private IPs / unreachable SpiderFoot (login required unless `none`) |
 | `POST` | `/api/agent/push` | `Authorization: Bearer <token>` + `{"host","lines":[]}` | max 5000 lines/req, 2000 chars/line, capped at 60k lines/host |
 
@@ -322,7 +334,8 @@ Read [`SECURITY.md`](SECURITY.md) before exposing anything.
 - Agents push outbound only (no inbound ports on members).
 - Bearer per-host tokens in `data/agents.json` (`0600`); Tailscale gives WireGuard identity + encryption. Optional in-repo TLS 1.3-only listener via `TLS_CERT`/`TLS_KEY`; agent `CENTRAL_URL=https://…` already verifies with system roots.
 - **Never expose 8079 publicly without SSO in front** (Tailscale Serve / Cloudflare Access / Authelia).
-- `/api/abusers` is safe-fields-only by construction (no accepted logins, hostnames, internal/self IPs, or raw lines) but stays behind the login gate unless you expose it intentionally — it is paginated, cached 60s, and rate-limited (`ABUSERS_RPM`, `429` + `Retry-After`).
+- `/api/abusers` (+ `/abusers` page) is safe-fields-only by construction (no accepted logins, hostnames, internal/self IPs, or raw lines) and lists **repeat offenders only**: ≥5 fails, risk-scored (attempts, user breadth, recency, optional AbuseIPDB confidence), auto-excluded on any successful login. Stays behind the login gate unless `ABUSERS_PUBLIC=1` — still rate-limited (`ABUSERS_RPM`, `429` + `Retry-After`).
+- `WHITELIST_IPS` removes owner/admin IPs from every attacker list (abusers, top table, map). `/api/self` tells each visitor their own list status.
 - `.env` and `data/` are git-ignored; only `.env.example` ships. Tokens are runtime-minted via `secrets.token_urlsafe(32)`.
 - Demo log is 100% synthetic (`demo/gen_auth_log.py`, seeded) — safe to share screenshots.
 

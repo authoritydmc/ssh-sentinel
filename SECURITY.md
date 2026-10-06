@@ -47,6 +47,13 @@ SSH Sentinel is designed to run on a **private tailnet or localhost**:
   paginated, cached 60s, rate-limited per client IP.
 - Treat `AGENT_TOKEN` like a password: pass via env / secret store,
   never commit to git, never paste in screenshots.
+- **First setup** (`AUTH_MODE=local` with no credential): the server mints
+  a one-time token (`ADMIN_SETUP_TOKEN` env or `data/setup.token`, `0600`,
+  printed once in the log). `POST /api/admin/setup` with that token creates
+  the admin login (`data/admin.json`, `0600`, pbkdf2-sha256). Setup closes
+  after first success. Env credential skips the wizard.
+- **Admin APIs** (`/api/admin/*`, `/api/banlist`) always need login. Ban
+  endpoints refuse private, reserved, self, and whitelisted IPs.
 - `SELF_PUBLIC_IPS` excludes your own scanners/VPN egress from attacker stats.
 - Demo data (`demo/auth.log.sample`) is fully synthetic — safe to share.
 

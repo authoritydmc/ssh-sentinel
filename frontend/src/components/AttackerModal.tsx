@@ -1,6 +1,6 @@
-import { Fingerprint, Globe2, Network, Radar, RefreshCw, Server, X } from 'lucide-react';
+import { Ban, Fingerprint, Flag, Globe2, Network, Radar, RefreshCw, Server, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { fetchIntel, fetchTail, fmtT, postRecon, relT, type IpIntel, type ReconState } from '../lib/api';
+import { fetchIntel, fetchTail, fmtT, postBan, postRecon, postReport, postUnban, relT, type IpIntel, type ReconState } from '../lib/api';
 import { Badge, eventTone } from './ui';
 
 export default function AttackerModal({ ip, host, onClose }: { ip: string; host: string; onClose: () => void }) {
@@ -8,6 +8,11 @@ export default function AttackerModal({ ip, host, onClose }: { ip: string; host:
   const [err, setErr] = useState('');
   const [recon, setRecon] = useState<ReconState | null>(null);
   const [chain, setChain] = useState<string[] | null>(null);
+  const [banMsg, setBanMsg] = useState('');
+
+  const reload = useCallback(() => {
+    fetchIntel(ip, host).then(setIntel).catch((e) => setErr(e.message));
+  }, [ip, host]);
 
   useEffect(() => {
     let live = true;
@@ -51,6 +56,43 @@ export default function AttackerModal({ ip, host, onClose }: { ip: string; host:
           <button onClick={onClose} className="rounded-lg p-2 text-[#8b98ad] hover:bg-white/10 hover:text-white" aria-label="Close"><X size={18} /></button>
         </div>
         {err && <p className="mb-3 rounded-lg bg-[#f85149]/10 p-3 text-sm text-[#ff9d97]">{err}</p>}
+
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-white/[.02] p-2.5 ring-1 ring-inset ring-white/5">
+          {intel?.ban?.banned ? (
+            <Badge tone="bad">banned · {intel.ban.source}</Badge>
+          ) : (
+            <Badge tone="dim">not banned</Badge>
+          )}
+          {(intel?.reports?.length ?? 0) > 0 && (
+            <Badge tone="warn" title={intel?.reports?.map((r) => `${r.provider}: ${r.status}`).join('; ')}>
+              reported ×{intel?.reports?.length}
+            </Badge>
+          )}
+          <span className="ml-auto flex gap-1.5">
+            {intel?.ban?.banned ? (
+              <button
+                onClick={() => postUnban(ip).then(reload).then(() => setBanMsg('Unbanned.')).catch((e) => setBanMsg(`Unban failed: ${e.message}`))}
+                className="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2.5 py-1 text-xs ring-1 ring-inset ring-white/10 hover:bg-white/10"
+              >
+                <Ban size={13} /> Unban
+              </button>
+            ) : (
+              <button
+                onClick={() => postBan(ip, 'manual from intel modal').then(reload).then(() => setBanMsg('Banned.')).catch((e) => setBanMsg(`Ban failed: ${e.message}`))}
+                className="inline-flex items-center gap-1 rounded-lg bg-[#f85149]/20 px-2.5 py-1 text-xs text-[#ff9d97] ring-1 ring-inset ring-[#f85149]/50 hover:bg-[#f85149]/30"
+              >
+                <Ban size={13} /> Ban IP
+              </button>
+            )}
+            <button
+              onClick={() => postReport(ip, h?.hits ?? 0, 80, 'high').then(() => setBanMsg('Report sent (or throttled).')).catch((e) => setBanMsg(`Report failed: ${e.message}`))}
+              className="inline-flex items-center gap-1 rounded-lg bg-[#58a6ff]/15 px-2.5 py-1 text-xs text-[#a5d6ff] ring-1 ring-inset ring-[#58a6ff]/40 hover:bg-[#58a6ff]/25"
+            >
+              <Flag size={13} /> Report
+            </button>
+          </span>
+        </div>
+        {banMsg && <p className="mb-3 text-xs text-[#8b98ad]">{banMsg}</p>}
 
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[

@@ -22,6 +22,8 @@ export interface IpIntel {
   ip: string; cc?: string; country?: string; city?: string; org?: string; isp?: string;
   as?: string; ptr?: string; rdap_name?: string; rdap_handle?: string; rdap_cc?: string;
   flag?: string; private?: boolean;
+  ban?: { banned: boolean; source?: string; created?: number; expires?: number };
+  reports?: { provider: string; ts: number; status: string }[];
   history: { users: [string, number][]; hits: number; first: number | null; last: number | null };
 }
 export interface ReconResult { type: string; data: string; module: string }
@@ -38,8 +40,13 @@ async function get<T>(p: string): Promise<T> {
 
 export interface Host { id: string; local: boolean; last_seen: number; online: boolean; lines?: number }
 export const fetchHosts = () => get<Host[]>('hosts');
-export interface AuthInfo { mode: string; login: string; user: string | null; safe: boolean; version?: string }
+export interface AuthInfo { mode: string; login: string; user: string | null; safe: boolean; version?: string; setup_needed?: boolean; abusers_public?: boolean }
 export const REPO_URL = 'https://github.com/authoritydmc/ssh-sentinel';
+export interface SelfInfo {
+  ip: string; whitelisted: boolean; listed: boolean; hits: number;
+  risk: number; band: string; first: number | null; last: number | null; message: string;
+}
+export const fetchSelf = () => get<SelfInfo>('self');
 export const fetchAuth = () => get<AuthInfo>('auth');
 const withHost = (p: string, host: string) => (host && host !== 'all' ? `${p}${p.includes('?') ? '&' : '?'}host=${encodeURIComponent(host)}` : p);
 export const fetchSummary = (host = 'all') => get<Summary>(withHost('summary', host));
@@ -55,6 +62,48 @@ export const fetchTail = async (q: string, n: number, host = 'all'): Promise<str
   if (!r.ok) throw new Error(`tail → HTTP ${r.status}`);
   return (await r.text()).split('\n').filter((x) => x.trim() !== '');
 };
+
+async function post<T>(p: string, body: unknown): Promise<T> {
+  const r = await fetch(api(p), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${p} → HTTP ${r.status}`);
+  return r.json() as Promise<T>;
+}
+
+export interface AdminStatus {
+  setup_needed: boolean; setup_token_configured: boolean;
+  ban_enabled: boolean; ban_auto: boolean; ban_jail: string;
+  ban_threshold: number; ban_window: number;
+  report_enabled: boolean; report_provider: string; report_throttle_days: number;
+  auth_mode: string; version?: string;
+}
+export interface BanEntry {
+  ip: string; jail: string; reason: string; source: string;
+  created: number; expires: number | null; fail2ban_ok: boolean;
+}
+export interface ActivityEntry { ts: number; actor: string; action: string; ip: string; detail: string }
+export interface ReportEntry { ip: string; provider: string; ts: number; status: string; detail: string }
+
+export const fetchAdminStatus = () => get<AdminStatus>('admin/status');
+export const fetchBans = async (): Promise<BanEntry[]> =>
+  (await get<{ bans: BanEntry[] }>('admin/bans')).bans;
+export const fetchActivity = async (limit = 200): Promise<ActivityEntry[]> =>
+  (await get<{ activity: ActivityEntry[] }>(`admin/activity?limit=${limit}`)).activity;
+export const fetchReports = async (): Promise<ReportEntry[]> =>
+  (await get<{ reports: ReportEntry[] }>('admin/reports')).reports;
+export const postBan = (ip: string, reason = '') =>
+  post<{ ok: boolean; ip: string }>('admin/ban', { ip, reason });
+export const postUnban = (ip: string) =>
+  post<{ ok: boolean; ip: string }>('admin/unban', { ip });
+export const postReport = (ip: string, hits: number, risk: number, band: string) =>
+  post<{ ok: boolean }>('admin/report', { ip, hits, risk, band });
+export const postSetup = (token: string, user: string, password: string) =>
+  post<{ ok: boolean; user: string }>('admin/setup', { token, user, password });
+export const postPassword = (oldPw: string, newPw: string) =>
+  post<{ ok: boolean }>('admin/password', { old: oldPw, new: newPw });
 
 export const fmtT = (e: number | null): string =>
   e ? new Date(e).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';

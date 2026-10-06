@@ -3,11 +3,14 @@
 import base64
 import binascii
 import hashlib
+import html
 import ipaddress
 import json
 import os
 import re
 import socket
+import sqlite3
+import subprocess
 import time
 import urllib.request
 from collections import Counter, defaultdict
@@ -20,6 +23,10 @@ DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 HOSTS_DIR = os.path.join(DATA_DIR, "hosts")
 AGENTS_FILE = os.path.join(DATA_DIR, "agents.json")
+ADMIN_FILE = os.path.join(DATA_DIR, "admin.json")
+SETUP_TOKEN_FILE = os.path.join(DATA_DIR, "setup.token")
+DB_PATH = os.path.join(DATA_DIR, "sentinel.db")
+BANLIST_FILE = os.path.join(DATA_DIR, "banlist.txt")
 HOST_ID = os.environ.get("HOST_ID", socket.gethostname().split(".")[0])
 START_TS = time.time()
 try:
@@ -103,6 +110,72 @@ def _via_trusted_proxy(addr):
     except ValueError:
         return False
     return any(ip in n for n in _TRUSTED_PROXY_NETS)
+
+
+def _read_admin_file():
+    try:
+        with open(ADMIN_FILE) as f:
+            d = json.load(f)
+        if isinstance(d, dict) and d.get("user") and d.get("pass_hash"):
+            return d
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _effective_local_user():
+    if AUTH_USER:
+        return AUTH_USER
+    f = _read_admin_file()
+    return f.get("user", "admin")
+
+
+def _local_configured():
+    if AUTH_PASS_HASH or _AUTH_PASSWORD:
+        return True
+    f = _read_admin_file()
+    return bool(f.get("user") and f.get("pass_hash"))
+
+
+def _setup_token():
+    env_tok = os.environ.get("ADMIN_SETUP_TOKEN", "").strip()
+    if env_tok:
+        return env_tok, "env"
+    try:
+        with open(SETUP_TOKEN_FILE) as f:
+            t = f.read().strip()
+        if t:
+            return t, "file"
+    except OSError:
+        pass
+    return "", "none"
+
+
+def _ensure_setup_token():
+    if _local_configured():
+        return ""
+    if os.environ.get("ADMIN_SETUP_TOKEN", "").strip():
+        return os.environ.get("ADMIN_SETUP_TOKEN", "").strip()
+    try:
+        with open(SETUP_TOKEN_FILE) as f:
+            t = f.read().strip()
+        if t:
+            return t
+    except OSError:
+        pass
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        import secrets as _sec
+        t = _sec.token_urlsafe(24)
+        with open(SETUP_TOKEN_FILE, "w") as f:
+            f.write(t + "\n")
+        try:
+            os.chmod(SETUP_TOKEN_FILE, 0o600)
+        except OSError:
+            pass
+        return t
+    except OSError:
+        return ""
 
 
 # --- built-in OIDC (AUTH_MODE=oidc) --------------------------------------
@@ -286,6 +359,581 @@ ABUSERS_TTL = 60
 # ABUSERS_PUBLIC=1 exposes the safe-fields feed + leaderboard without login.
 # Data is attacker-only by construction (no logins, hostnames, private IPs).
 ABUSERS_PUBLIC = os.environ.get("ABUSERS_PUBLIC", "").strip().lower() in ("1", "yes", "true", "on")
+# Admin whitelist: these IPs never appear in attacker lists (abusers, top,
+# map). Comma-separated. The owner asks the admin to add them here.
+WHITELIST_IPS = _csv_env("WHITELIST_IPS")
+# Public-list quality bar: multi-attempt attackers only. A forgetful user
+# with a few fails followed by a correct login is never listed publicly.
+try:
+    ABUSERS_MIN_HITS = max(2, int(os.environ.get("ABUSERS_MIN_HITS", "5")))
+except ValueError:
+    ABUSERS_MIN_HITS = 5
+try:
+    ABUSERS_MIN_SCORE = max(0, min(100, int(os.environ.get("ABUSERS_MIN_SCORE", "25"))))
+except ValueError:
+    ABUSERS_MIN_SCORE = 25
+# Optional AbuseIPDB enrichment (abuse confidence 0-100 feeds the score).
+# Get a key at abuseipdb.com (free tier is enough). Empty = skipped.
+ABUSEIPDB_KEY = os.environ.get("ABUSEIPDB_KEY", "").strip()
+ABUSE_TTL = 24 * 3600
+
+
+def abuse_score(ip):
+    """AbuseIPDB confidence 0-100, cached 24h. 0 when keyless/offline."""
+    if not ABUSEIPDB_KEY:
+        return 0
+    key = "abuse:" + ip
+    ent = _cache.get(key, {})
+    if ent and time.time() - ent.get("ts", 0) < ABUSE_TTL:
+        return ent.get("score", 0)
+    score = 0
+    try:
+        req = urllib.request.Request(
+            "https://api.abuseipdb.com/api/v2/check?ipAddress=" + ip + "&maxAgeInDays=90",
+            headers={"Key": ABUSEIPDB_KEY, "Accept": "application/json",
+                     "User-Agent": "ssh-sentinel/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.load(r).get("data", {})
+        score = max(0, min(100, int(data.get("abuseConfidenceScore", 0))))
+    except Exception:
+        score = 0
+    _cache[key] = {"score": score, "ts": time.time()}
+    return score
+
+
+def risk_of(hits, users_n, last_ms, accepted, external=0, velocity=0, prior_ban=False):
+    """Risk 0-100 with reasons. Accepted logins push far below the bar."""
+    import math as _math
+    reasons = []
+    score = min(40, int(12 * _math.log10(1 + hits)))
+    reasons.append("%d attempts" % hits)
+    ub = min(30, 8 * users_n)
+    score += ub
+    if users_n > 1:
+        reasons.append("%d users tried" % users_n)
+    now_ms = int(time.time() * 1000)
+    if last_ms and now_ms - last_ms < 3600000:
+        score += 15
+        reasons.append("active this hour")
+    elif last_ms and now_ms - last_ms < 86400000:
+        score += 10
+        reasons.append("active today")
+    if velocity and velocity >= 5:
+        vb = min(20, int(velocity // 2))
+        score += vb
+        reasons.append("fast hammer: %d/h" % int(velocity))
+    if prior_ban:
+        score += 15
+        reasons.append("banned before")
+    if accepted:
+        score -= 100
+        reasons.append("has a successful login (likely the owner)")
+    if external:
+        score += min(25, external // 2)
+        reasons.append("abuse reports: %d/100" % external)
+    score = max(0, min(100, score))
+    band = "low" if score < 30 else ("medium" if score < 60 else ("high" if score < 80 else "critical"))
+    return score, band, reasons
+
+
+# --- bans, risk store, reports (issue #19) --------------------------------
+# All stdlib. SQLite file lives in DATA_DIR. Logs stay source of truth.
+def _bool_env(name, default=False):
+    v = os.environ.get(name, "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "yes", "true", "on")
+
+
+def _int_env(name, default, lo, hi):
+    try:
+        return max(lo, min(hi, int(os.environ.get(name, str(default)).strip() or default)))
+    except ValueError:
+        return default
+
+
+BAN_ENABLED = _bool_env("BAN_ENABLED", False)
+BAN_JAIL = os.environ.get("BAN_JAIL", "sshd").strip() or "sshd"
+BAN_TIME = _int_env("BAN_TIME", 86400, 300, 30 * 86400)
+BAN_AUTO = _bool_env("BAN_AUTO", False)
+BAN_THRESHOLD = _int_env("BAN_THRESHOLD", 20, 3, 10000)
+BAN_WINDOW = _int_env("BAN_WINDOW", 600, 60, 7 * 86400)
+BAN_AUTO_TIME = _int_env("BAN_AUTO_TIME", 86400, 300, 30 * 86400)
+REPORT_ENABLED = _bool_env("REPORT_ENABLED", False)
+REPORT_PROVIDER = os.environ.get("REPORT_PROVIDER", "abuseipdb").strip().lower() or "abuseipdb"
+REPORT_THROTTLE_DAYS = _int_env("REPORT_THROTTLE_DAYS", 7, 1, 90)
+REPORT_MIN_RISK = _int_env("REPORT_MIN_RISK", 60, 0, 100)
+REPORT_MIN_HITS = _int_env("REPORT_MIN_HITS", 20, 2, 100000)
+ABUSE_WEBHOOK_URL = os.environ.get("ABUSE_WEBHOOK_URL", "").rstrip("/")
+ABUSE_WEBHOOK_TOKEN = os.environ.get("ABUSE_WEBHOOK_TOKEN", "")
+
+
+def _valid_ip(s):
+    try:
+        a = ipaddress.ip_address(str(s).strip())
+        return str(a)
+    except ValueError:
+        return ""
+
+
+def db():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    c = sqlite3.connect(DB_PATH, timeout=10)
+    c.execute("PRAGMA journal_mode=WAL")
+    return c
+
+
+_DB_READY = False
+
+
+def _ensure_db():
+    global _DB_READY
+    if _DB_READY:
+        return
+    try:
+        db_init()
+    except Exception:
+        pass
+    _DB_READY = True
+
+
+def db_init():
+    c = db()
+    try:
+        c.execute("CREATE TABLE IF NOT EXISTS ip_stats"
+                  "(ip TEXT PRIMARY KEY, hits INTEGER, users_json TEXT,"
+                  " first REAL, last REAL, risk INTEGER, band TEXT,"
+                  " reasons_json TEXT, updated REAL)")
+        c.execute("CREATE TABLE IF NOT EXISTS bans"
+                  "(ip TEXT PRIMARY KEY, jail TEXT, reason TEXT, source TEXT,"
+                  " created REAL, expires REAL, active INTEGER, fail2ban_ok INTEGER)")
+        c.execute("CREATE TABLE IF NOT EXISTS reports"
+                  "(ip TEXT, provider TEXT, ts REAL, status TEXT, detail TEXT,"
+                  " PRIMARY KEY (ip, provider))")
+        c.execute("CREATE TABLE IF NOT EXISTS activity"
+                  "(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, actor TEXT,"
+                  " action TEXT, ip TEXT, detail TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT)")
+        c.commit()
+    finally:
+        c.close()
+
+
+def activity_log(actor, action, ip="", detail=""):
+    try:
+        c = db()
+        try:
+            c.execute("INSERT INTO activity(ts, actor, action, ip, detail)"
+                      " VALUES(?,?,?,?,?)",
+                      (time.time(), str(actor)[:80], str(action)[:40],
+                       str(ip)[:45], str(detail)[:500]))
+            c.execute("DELETE FROM activity WHERE id NOT IN"
+                      " (SELECT id FROM activity ORDER BY id DESC LIMIT 2000)")
+            c.commit()
+        finally:
+            c.close()
+    except Exception:
+        pass
+
+
+def activity_list(limit=200):
+    try:
+        c = db()
+        try:
+            rows = c.execute("SELECT ts, actor, action, ip, detail FROM activity"
+                             " ORDER BY id DESC LIMIT ?",
+                             (max(1, min(500, int(limit))),)).fetchall()
+        finally:
+            c.close()
+        return [{"ts": int(t * 1000), "actor": a, "action": ac,
+                 "ip": ip, "detail": d} for t, a, ac, ip, d in rows]
+    except Exception:
+        return []
+
+
+def _write_banlist(active_ips):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(BANLIST_FILE, "w") as f:
+            for ip in sorted(set(active_ips)):
+                f.write(ip + "\n")
+        try:
+            os.chmod(BANLIST_FILE, 0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def ban_list_active():
+    try:
+        now = time.time()
+        c = db()
+        try:
+            rows = c.execute("SELECT ip, jail, reason, source, created, expires,"
+                             " fail2ban_ok FROM bans WHERE active=1").fetchall()
+        finally:
+            c.close()
+        out = []
+        for ip, jail, reason, source, created, expires, ok in rows:
+            if expires and expires < now:
+                continue
+            out.append({"ip": ip, "jail": jail, "reason": reason,
+                        "source": source, "created": int(created * 1000),
+                        "expires": int(expires * 1000) if expires else None,
+                        "fail2ban_ok": bool(ok)})
+        return out
+    except Exception:
+        return []
+
+
+def _fail2ban(cmd, jail, ip):
+    try:
+        r = subprocess.run(["fail2ban-client", "set", jail, cmd, ip],
+                           timeout=10, capture_output=True, text=True)
+        return r.returncode == 0
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+
+
+def ban_add(ip, reason="", source="manual", actor="admin", ttl=None):
+    ip = _valid_ip(ip)
+    if not ip:
+        return {"ok": False, "error": "bad ip"}
+    try:
+        a = ipaddress.ip_address(ip)
+        if not (a.is_global and not a.is_reserved):
+            return {"ok": False, "error": "not a public IP"}
+    except ValueError:
+        return {"ok": False, "error": "bad ip"}
+    if ip in WHITELIST_IPS or ip in own_ips():
+        return {"ok": False, "error": "IP is whitelisted or self"}
+    ttl_s = BAN_TIME if ttl is None else max(300, min(30 * 86400, int(ttl)))
+    now = time.time()
+    ok = _fail2ban("banip", BAN_JAIL, ip) if BAN_ENABLED else False
+    try:
+        c = db()
+        try:
+            c.execute("INSERT OR REPLACE INTO bans"
+                      "(ip, jail, reason, source, created, expires, active, fail2ban_ok)"
+                      " VALUES(?,?,?,?,?,?,1,?)",
+                      (ip, BAN_JAIL, str(reason)[:200], str(source)[:20],
+                       now, now + ttl_s, 1 if ok else 0))
+            c.commit()
+        finally:
+            c.close()
+    except Exception as e:
+        return {"ok": False, "error": type(e).__name__}
+    _write_banlist([b["ip"] for b in ban_list_active()])
+    activity_log(actor, "ban", ip, "%s via %s f2b=%s" % (source, BAN_JAIL, ok))
+    return {"ok": True, "ip": ip, "fail2ban_ok": ok,
+            "expires": int((now + ttl_s) * 1000)}
+
+
+def ban_remove(ip, actor="admin"):
+    ip = _valid_ip(ip)
+    if not ip:
+        return {"ok": False, "error": "bad ip"}
+    ok = _fail2ban("unbanip", BAN_JAIL, ip) if BAN_ENABLED else False
+    try:
+        c = db()
+        try:
+            c.execute("UPDATE bans SET active=0 WHERE ip=?", (ip,))
+            c.commit()
+        finally:
+            c.close()
+    except Exception as e:
+        return {"ok": False, "error": type(e).__name__}
+    _write_banlist([b["ip"] for b in ban_list_active()])
+    activity_log(actor, "unban", ip, "via %s f2b=%s" % (BAN_JAIL, ok))
+    return {"ok": True, "ip": ip}
+
+
+def ban_state(ip):
+    try:
+        c = db()
+        try:
+            r = c.execute("SELECT source, created, expires, active FROM bans"
+                          " WHERE ip=?", (ip,)).fetchone()
+        finally:
+            c.close()
+        if not r or not r[3]:
+            return {"banned": False}
+        if r[2] and r[2] < time.time():
+            return {"banned": False}
+        return {"banned": True, "source": r[0],
+                "created": int(r[1] * 1000), "expires": int(r[2] * 1000)}
+    except Exception:
+        return {"banned": False}
+
+
+def prior_ban_flag(ip):
+    try:
+        c = db()
+        try:
+            r = c.execute("SELECT 1 FROM bans WHERE ip=? LIMIT 1", (ip,)).fetchone()
+        finally:
+            c.close()
+        return bool(r)
+    except Exception:
+        return False
+
+
+def report_state(ip):
+    try:
+        c = db()
+        try:
+            rows = c.execute("SELECT provider, ts, status FROM reports"
+                             " WHERE ip=?", (ip,)).fetchall()
+        finally:
+            c.close()
+        return [{"provider": p, "ts": int(t * 1000), "status": s}
+                for p, t, s in rows]
+    except Exception:
+        return []
+
+
+def _report_due(ip, provider):
+    try:
+        c = db()
+        try:
+            r = c.execute("SELECT ts FROM reports WHERE ip=? AND provider=?",
+                          (ip, provider)).fetchone()
+        finally:
+            c.close()
+        if not r:
+            return True
+        return (time.time() - r[0]) > REPORT_THROTTLE_DAYS * 86400
+    except Exception:
+        return True
+
+
+def _report_record(ip, provider, status, detail=""):
+    try:
+        c = db()
+        try:
+            c.execute("INSERT OR REPLACE INTO reports(ip, provider, ts, status, detail)"
+                      " VALUES(?,?,?,?,?)",
+                      (ip, provider, time.time(), str(status)[:40],
+                       str(detail)[:500]))
+            c.commit()
+        finally:
+            c.close()
+    except Exception:
+        pass
+
+
+def _abuseipdb_report(ip, hits, risk):
+    if not ABUSEIPDB_KEY:
+        return False, "no key"
+    try:
+        fields = {"ipAddress": ip, "categories": "22",
+                  "comment": "SSH brute force: %d fails, risk %d (ssh-sentinel)" % (hits, risk)}
+        data = urlencode(fields).encode()
+        req = urllib.request.Request(
+            "https://api.abuseipdb.com/api/v2/report", data=data,
+            headers={"Key": ABUSEIPDB_KEY,
+                     "Content-Type": "application/x-www-form-urlencoded",
+                     "Accept": "application/json",
+                     "User-Agent": "ssh-sentinel/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            payload = json.load(r)
+        err = ""
+        try:
+            err = str(payload.get("errors", ""))[:200]
+        except Exception:
+            err = ""
+        if err:
+            return False, err
+        return True, "reported"
+    except Exception as e:
+        return False, type(e).__name__
+
+
+def _webhook_report(ip, hits, risk, band):
+    if not ABUSE_WEBHOOK_URL:
+        return False, "no webhook"
+    try:
+        body = {"ip": ip, "hits": hits, "risk": risk, "band": band,
+                "categories": ["ssh-brute-force"], "source": "ssh-sentinel"}
+        headers = {"Content-Type": "application/json",
+                   "User-Agent": "ssh-sentinel-report/1.0"}
+        if ABUSE_WEBHOOK_TOKEN:
+            headers["Authorization"] = "Bearer " + ABUSE_WEBHOOK_TOKEN
+        req = urllib.request.Request(ABUSE_WEBHOOK_URL, data=json.dumps(body).encode(),
+                                     headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read(4096)
+        return True, "reported"
+    except Exception as e:
+        return False, type(e).__name__
+
+
+def report_ip(ip, hits, risk, band, actor="system"):
+    """Report one IP to enabled providers. Throttled. Safe payload only."""
+    ip = _valid_ip(ip)
+    if not ip:
+        return {"ok": False, "error": "bad ip"}
+    if not REPORT_ENABLED:
+        return {"ok": False, "error": "reports off"}
+    if hits < REPORT_MIN_HITS or risk < REPORT_MIN_RISK:
+        return {"ok": False, "error": "below bar"}
+    providers = []
+    if REPORT_PROVIDER in ("abuseipdb", "all"):
+        providers.append("abuseipdb")
+    if REPORT_PROVIDER in ("webhook", "all"):
+        providers.append("webhook")
+    out = {}
+    for p in providers:
+        if not _report_due(ip, p):
+            out[p] = "throttled"
+            continue
+        if p == "abuseipdb":
+            ok, msg = _abuseipdb_report(ip, hits, risk)
+        else:
+            ok, msg = _webhook_report(ip, hits, risk, band)
+        _report_record(ip, p, "sent" if ok else "error", msg)
+        activity_log(actor, "report", ip, "%s: %s" % (p, msg))
+        out[p] = msg
+    return {"ok": True, "ip": ip, "results": out}
+
+
+def admin_status():
+    tok, _ = _setup_token()
+    return {"setup_needed": not _local_configured(),
+            "setup_token_configured": bool(tok),
+            "ban_enabled": BAN_ENABLED, "ban_auto": BAN_AUTO,
+            "ban_jail": BAN_JAIL, "ban_threshold": BAN_THRESHOLD,
+            "ban_window": BAN_WINDOW,
+            "report_enabled": REPORT_ENABLED, "report_provider": REPORT_PROVIDER,
+            "report_throttle_days": REPORT_THROTTLE_DAYS,
+            "auth_mode": AUTH_MODE, "version": os.environ.get("APP_VERSION", "dev")}
+
+
+try:
+    _ensure_db()
+except Exception:
+    pass
+
+
+def _sync_ip_stats(entries):
+    try:
+        c = db()
+        try:
+            now = time.time()
+            for e in entries[:200]:
+                c.execute("INSERT OR REPLACE INTO ip_stats"
+                          "(ip, hits, users_json, first, last, risk, band,"
+                          " reasons_json, updated) VALUES(?,?,?,?,?,?,?,?,?)",
+                          (e["ip"], e["hits"],
+                           json.dumps(e.get("attempted_users", [])[:10]),
+                           (e.get("first") or 0) / 1000.0 if e.get("first") else 0,
+                           (e.get("last") or 0) / 1000.0 if e.get("last") else 0,
+                           e.get("risk", 0), e.get("band", ""),
+                           json.dumps(e.get("reasons", [])), now))
+            c.commit()
+        finally:
+            c.close()
+    except Exception:
+        pass
+
+
+def _auto_ban_scan():
+    if not BAN_AUTO:
+        return 0
+    try:
+        lines = read_lines("all")[-20000:]
+    except Exception:
+        return 0
+    now = datetime.now()
+    cutoff = time.time() - BAN_WINDOW
+    per_ip = Counter()
+    for ln in lines:
+        m = FAIL_RE.search(ln) or INVALID_RE.search(ln)
+        ip = None
+        if m:
+            ip = m.group(2)
+        else:
+            m2 = CLOSED_RE.search(ln) or DISC_RE.search(ln)
+            if m2 and is_public_ip(m2.group(1)):
+                ip = m2.group(1)
+        if not ip:
+            continue
+        ts = parse_ts(ln, now)
+        ets = ts.timestamp() if ts else time.time()
+        if ets < cutoff:
+            continue
+        per_ip[ip] += 1
+    try:
+        mine = own_ips()
+    except Exception:
+        mine = set()
+    accepted = set()
+    try:
+        for ln in lines[-5000:]:
+            am = ACCEPT_RE.search(ln)
+            if am:
+                accepted.add(am.group(2))
+    except Exception:
+        pass
+    active = {b["ip"] for b in ban_list_active()}
+    n = 0
+    for ip, hits in per_ip.most_common(100):
+        if hits < BAN_THRESHOLD:
+            continue
+        if ip in active or ip in mine or ip in WHITELIST_IPS:
+            continue
+        if not is_public_ip(ip) or ip in accepted:
+            continue
+        velocity = hits * 3600.0 / max(60, BAN_WINDOW)
+        ext = abuse_score(ip) if ABUSEIPDB_KEY else 0
+        score, _band, _reasons = risk_of(hits, 3, int(time.time() * 1000),
+                                         False, ext, velocity, prior_ban_flag(ip))
+        if score < ABUSERS_MIN_SCORE:
+            continue
+        r = ban_add(ip, "auto: %d fails in %ds" % (hits, BAN_WINDOW),
+                    "auto", "system", BAN_AUTO_TIME)
+        if r.get("ok"):
+            n += 1
+    return n
+
+
+def _auto_report_scan():
+    if not REPORT_ENABLED:
+        return 0
+    try:
+        entries = abusers("all")[:30]
+    except Exception:
+        return 0
+    _sync_ip_stats(entries)
+    n = 0
+    for e in entries:
+        if e.get("hits", 0) < REPORT_MIN_HITS or e.get("risk", 0) < REPORT_MIN_RISK:
+            continue
+        due = any(_report_due(e["ip"], p) for p in (
+            ["abuseipdb"] if REPORT_PROVIDER == "abuseipdb" else
+            ["webhook"] if REPORT_PROVIDER == "webhook" else ["abuseipdb", "webhook"]))
+        if not due:
+            continue
+        r = report_ip(e["ip"], e["hits"], e["risk"], e.get("band", ""), "system")
+        if r.get("ok"):
+            n += 1
+        if n >= 5:
+            break
+    return n
+
+
+def _ops_loop():
+    while True:
+        try:
+            _auto_ban_scan()
+        except Exception:
+            pass
+        try:
+            _auto_report_scan()
+        except Exception:
+            pass
+        time.sleep(60)
 # Optional in-repo TLS (TLS 1.3 only). Off unless both point at files.
 # Preferred fleet path stays: Tailscale cert on central + https CENTRAL_URL.
 TLS_CERT = os.environ.get("TLS_CERT", "").strip()
@@ -316,7 +964,25 @@ def _verify_local_password(pw):
         return _hmac.compare_digest(got, expect)
     if _AUTH_PASSWORD:
         return bool(pw) and _hmac.compare_digest(pw, _AUTH_PASSWORD)
+    f = _read_admin_file()
+    if f.get("pass_hash"):
+        p = _parse_pass_hash(f["pass_hash"])
+        if not p:
+            return False
+        it, salt, expect = p
+        try:
+            got = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, it)
+        except (ValueError, OverflowError):
+            return False
+        return _hmac.compare_digest(got, expect)
     return False
+
+
+def _mint_pass_hash(pw):
+    import secrets as _sec
+    salt = _sec.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 200000)
+    return "pbkdf2-sha256$200000$%s$%s" % (salt.hex(), dk.hex())
 
 
 def auth_status(user=None):
@@ -325,7 +991,8 @@ def auth_status(user=None):
             "user": user or None,
             "safe": AUTH_MODE in ("local", "forward", "oidc"),
             "version": os.environ.get("APP_VERSION", "dev"),
-            "abusers_public": ABUSERS_PUBLIC}
+            "abusers_public": ABUSERS_PUBLIC,
+            "setup_needed": AUTH_MODE == "local" and not _local_configured()}
 
 
 def health():
@@ -871,6 +1538,7 @@ def summary(host=None):
     now = datetime.now()
     mine = own_ips()
     skipped_self = 0
+    skipped_white = 0
     pair_counts, per_ip, hours, ok_hours = Counter(), Counter(), defaultdict(int), defaultdict(int)
     logins = []
     for ln in lines:
@@ -878,6 +1546,9 @@ def summary(host=None):
         if m:
             if m.group(2) in mine:
                 skipped_self += 1
+                continue
+            if m.group(2) in WHITELIST_IPS:
+                skipped_white += 1
                 continue
             pair_counts[(m.group(1), m.group(2))] += 1
             per_ip[m.group(2)] += 1
@@ -889,6 +1560,9 @@ def summary(host=None):
         if m and is_public_ip(m.group(1)):
             if m.group(1) in mine:
                 skipped_self += 1
+                continue
+            if m.group(1) in WHITELIST_IPS:
+                skipped_white += 1
                 continue
             # Pre-auth probe with no username (scanner handshake / disconnect).
             pair_counts[("?", m.group(1))] += 1
@@ -940,7 +1614,8 @@ def summary(host=None):
             "suspicious_count": sum(1 for e in logins if e.get("suspicious")),
             "privacy_mode": PRIVACY_MODE,
             "trusted_configured": bool(TRUSTED_IPS or TRUSTED_USERS),
-            "excluded_self": skipped_self, "self_ips": self_ips_out,
+            "excluded_self": skipped_self, "excluded_whitelisted": skipped_white,
+            "self_ips": self_ips_out,
             "geo_cached": sum(1 for k in _cache if k.startswith("geo:")),
             "now": _epoch_ms(now), "host": host or "all",
             "hosts": list_hosts()}
@@ -958,12 +1633,65 @@ def _abusers_limited(client):
     return len(arr) > ABUSERS_RPM
 
 
+def _is_ip(s):
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _abusers_page():
+    """Public leaderboard HTML. Attacker rows only — same safe fields."""
+    try:
+        entries = abusers(None)[:100]
+    except Exception:
+        entries = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    rows = []
+    for i, e in enumerate(entries, 1):
+        loc = ", ".join(x for x in (e.get("city"), e.get("country")) if x) or e.get("cc", "")
+        users = ", ".join("%s (%d)" % (x["user"], x["hits"]) for x in e["users"][:4])
+        tip = html.escape("; ".join(e.get("reasons", [])), quote=True)
+        rows.append(
+            "<tr><td>%d</td><td class=mono>%s</td><td>%d</td>"
+            "<td><span class='band %s' title='%s'>%d %s</span></td>"
+            "<td>%s</td><td class=mono>%s</td></tr>" % (
+                i, html.escape(e["ip"]), e["hits"], e["band"], tip,
+                e["risk"], e["band"], html.escape(loc), html.escape(users)))
+    body = "".join(rows) or "<tr><td colspan=6>No listed attackers right now.</td></tr>"
+    return ("""<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content='width=device-width,initial-scale=1'>
+<title>SSH Sentinel — public abusers</title>
+<style>body{background:#0a0f1c;color:#dbe4f3;font:14px/1.5 system-ui,sans-serif;margin:0;padding:24px;max-width:1000px}
+h1{font-size:20px;margin:0 0 4px}.sub{color:#8b98ad;margin-bottom:16px}
+table{width:100%%;border-collapse:collapse;font-size:13px}
+td,th{border-bottom:1px solid #1e2a3f;padding:7px 10px;text-align:left}
+th{color:#8b98ad;font-size:12px}.mono{font-family:ui-monospace,monospace}
+.band{border-radius:20px;padding:1px 10px;font-size:12px}
+.low{background:#3fb95022;color:#7ee787}.medium{background:#d2992222;color:#e8b93e}
+.high{background:#f0883e22;color:#f0883e}.critical{background:#f8514922;color:#ff9d97}
+a{color:#58a6ff}.note{color:#8b98ad;font-size:12px;margin-top:14px}</style>
+</head><body>
+<h1>🛡️ SSH Sentinel — public abusers</h1>
+<div class=sub>%d repeat attackers · updated %s · JSON: <a href="/api/abusers">/api/abusers</a></div>
+<table><tr><th>#</th><th>IP</th><th>Hits</th><th>Risk</th><th>Origin</th><th>Users tried</th></tr>%s</table>
+<p class=note>Repeat SSH attackers only (5+ fails, scored, no successful logins,
+never whitelisted or private IPs). Is your IP here by mistake? Ask the server
+admin to add it to WHITELIST_IPS.</p>
+</body></html>""" % (len(entries), now, body))
+
+
 def abusers(host=None):
-    """Public-safe attacker feed: failed/probe-derived IPs only.
+    """Public-safe attacker feed: repeat offenders only.
+
+    Lists an IP only when it has ABUSERS_MIN_HITS fails, a risk score at
+    or above ABUSERS_MIN_SCORE, no successful login, and no whitelist
+    entry — so a forgetful owner is never published. Each entry carries
+    its risk score, band, and reasons. Cached ABUSERS_TTL seconds.
 
     NEVER exposes accepted logins, hostnames, internal/self IPs, or raw
-    log lines — only attacker IP, hit counts, attempted users, first/last
-    seen, and geo/org/ASN enrichment. Cached ABUSERS_TTL seconds.
+    log lines.
     """
     host = host or "all"
     now_t = time.time()
@@ -975,9 +1703,14 @@ def abusers(host=None):
     mine = own_ips()
     per_ip = Counter()
     users = defaultdict(Counter)
+    accepted = set()
     first = {}
     last = {}
     for ln in lines:
+        am = ACCEPT_RE.search(ln)
+        if am:
+            accepted.add(am.group(2))
+            continue
         grp = None
         m = FAIL_RE.search(ln) or INVALID_RE.search(ln)
         if m:
@@ -989,7 +1722,7 @@ def abusers(host=None):
         if not grp:
             continue
         u, ip = grp
-        if ip in mine or not is_public_ip(ip):
+        if ip in mine or ip in WHITELIST_IPS or not is_public_ip(ip):
             continue
         per_ip[ip] += 1
         users[ip][u] += 1
@@ -1000,11 +1733,24 @@ def abusers(host=None):
                 first[ip] = e
             if ip not in last or e > last[ip]:
                 last[ip] = e
-    geo_lookup([ip for ip, _ in per_ip.most_common(200)])
+    cands = [(ip, hits) for ip, hits in per_ip.most_common(200)
+             if hits >= ABUSERS_MIN_HITS]
+    geo_lookup([ip for ip, _ in cands])
+    # External abuse intel only for IPs that pass the local bar (saves quota).
+    ext = {}
+    if ABUSEIPDB_KEY:
+        for ip, _ in cands[:50]:
+            ext[ip] = abuse_score(ip)
     entries = []
     for ip, hits in per_ip.most_common(500):
+        if hits < ABUSERS_MIN_HITS:
+            continue
         g = _cache.get("geo:" + ip, {})
         top_users = users[ip].most_common(5)
+        score, band, reasons = risk_of(hits, len(users[ip]), last.get(ip),
+                                       ip in accepted, ext.get(ip, 0))
+        if score < ABUSERS_MIN_SCORE or ip in accepted:
+            continue
         entries.append({
             "ip": ip, "hits": hits,
             "first": first.get(ip), "last": last.get(ip),
@@ -1013,7 +1759,9 @@ def abusers(host=None):
             "cc": g.get("cc", ""), "country": g.get("country", ""),
             "city": g.get("city", ""), "org": g.get("org", "") or g.get("isp", ""),
             "asn": g.get("as", ""), "lat": g.get("lat"), "lon": g.get("lon"),
-            "flag": flag(g.get("cc", ""))})
+            "flag": flag(g.get("cc", "")),
+            "risk": score, "band": band, "reasons": reasons})
+    entries.sort(key=lambda e: (-e["risk"], -e["hits"]))
     _abusers_cache.update({"ts": now_t, "host": host, "entries": entries})
     return entries
 
@@ -1097,7 +1845,10 @@ class H(BaseHTTPRequestHandler):
         except (ValueError, binascii.Error):
             return ""
         user, _, pw = creds.partition(":")
-        if not user or not pw or user != AUTH_USER:
+        if not user or not pw:
+            return ""
+        expect_user = AUTH_USER or _read_admin_file().get("user", "") or "admin"
+        if user != expect_user:
             return ""
         return user if _verify_local_password(pw) else ""
 
@@ -1134,13 +1885,17 @@ class H(BaseHTTPRequestHandler):
             return u, None
         u = self._basic_user()
         if not u:
-            if not (AUTH_PASS_HASH or _AUTH_PASSWORD):
-                return None, (401, "local login enabled but no credential configured: "
-                                   "set AUTH_USER + AUTH_PASS_HASH (`server.py genhash`) "
-                                   "or AUTH_PASSWORD — or AUTH_MODE=none on a private "
-                                   "network only")
+            if not _local_configured():
+                return None, (401, "setup needed: open Admin setup with the one-time "
+                                   "token from DATA_DIR/setup.token or ADMIN_SETUP_TOKEN, "
+                                   "POST /api/admin/setup — or set AUTH_USER + "
+                                   "AUTH_PASS_HASH (`server.py genhash`)")
             return None, (401, "login required")
         return u, None
+
+    def _client_ip(self):
+        fwd = (self.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip()
+        return fwd or self.client_address[0]
 
     def _deny(self, gate):
         code, msg = gate
@@ -1173,15 +1928,51 @@ class H(BaseHTTPRequestHandler):
                 # Report mode without leaking identity; UI uses this for the lock badge.
                 return self._send(json.dumps(auth_status()), "application/json")
             return self._send(json.dumps(auth_status(user)), "application/json")
+        if u.path == "/api/admin/status":
+            return self._send(json.dumps(admin_status()), "application/json")
+        if u.path == "/api/self":
+            # "Is my IP flagged?" — open to all, reveals only the caller's
+            # own address and its list status. Powers the UI self-check.
+            me = self._client_ip()
+            mine = ipaddress.ip_address(me) if _is_ip(me) else None
+            try:
+                entries = abusers(None)
+            except Exception:
+                entries = []
+            hit = next((e for e in entries if e["ip"] == me), None)
+            if mine is not None and not mine.is_global:
+                msg = "your address is not a public IP — nothing to check"
+            elif me in WHITELIST_IPS:
+                msg = "your IP is whitelisted by the admin — you are clear"
+            elif hit:
+                msg = ("your IP %s has %d failed attempts (risk %d/%s). "
+                       "If this is you, ask the admin to whitelist you "
+                       "via WHITELIST_IPS." % (me, hit["hits"], hit["risk"], hit["band"]))
+            else:
+                msg = "your IP is not on the attacker list — you are clear"
+            return self._send(json.dumps({
+                "ip": me, "whitelisted": me in WHITELIST_IPS,
+                "listed": hit is not None,
+                "hits": hit["hits"] if hit else 0,
+                "risk": hit["risk"] if hit else 0,
+                "band": hit["band"] if hit else "clear",
+                "first": hit["first"] if hit else None,
+                "last": hit["last"] if hit else None,
+                "message": msg}), "application/json")
+        if u.path == "/abusers":
+            if not ABUSERS_PUBLIC:
+                return self._send(json.dumps({"error": "public list is off "
+                                                       "(ABUSERS_PUBLIC=1 enables it)"}),
+                                  "application/json", 404)
+            return self._send(_abusers_page(), "text/html; charset=utf-8")
         if u.path == "/api/abusers":
-            # Public feed by design (safe fields only) but still behind the
-            # UI gate unless intentionally exposed: keep gate first so
-            # AUTH_MODE=local/forward deployments stay private by default.
-            user, gate = self._gate()
-            if gate is not None:
-                return self._deny(gate)
-            client = (self.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip() \
-                or self.client_address[0]
+            # Safe fields only, but behind the UI gate unless the owner
+            # opens it explicitly with ABUSERS_PUBLIC=1.
+            if not ABUSERS_PUBLIC:
+                user, gate = self._gate()
+                if gate is not None:
+                    return self._deny(gate)
+            client = self._client_ip()
             if _abusers_limited(client):
                 return self._send(json.dumps({"error": "rate limited"}),
                                     "application/json", 429, {"Retry-After": "60"})
@@ -1216,6 +2007,37 @@ class H(BaseHTTPRequestHandler):
                                   {"WWW-Authenticate": 'Basic realm="ssh-sentinel"'})
             return self._deny(gate)
         self._auth_user = user
+        if u.path == "/api/admin/bans":
+            return self._send(json.dumps({"bans": ban_list_active()}), "application/json")
+        if u.path == "/api/admin/activity":
+            try:
+                lim = max(1, min(500, int(q.get("limit", ["200"])[0])))
+            except ValueError:
+                lim = 200
+            return self._send(json.dumps({"activity": activity_list(lim)}),
+                              "application/json")
+        if u.path == "/api/admin/reports":
+            try:
+                c = db()
+                try:
+                    rows = c.execute("SELECT ip, provider, ts, status, detail FROM reports"
+                                     " ORDER BY ts DESC LIMIT 200").fetchall()
+                finally:
+                    c.close()
+                reps = [{"ip": ip, "provider": p, "ts": int(t * 1000),
+                         "status": s, "detail": d} for ip, p, t, s, d in rows]
+            except Exception:
+                reps = []
+            return self._send(json.dumps({"reports": reps}), "application/json")
+        if u.path == "/api/admin/banstate":
+            ip = (q.get("ip", [""])[0] or "")[:45]
+            return self._send(json.dumps({"ip": ip, "ban": ban_state(ip),
+                                          "reports": report_state(ip)}),
+                              "application/json")
+        if u.path == "/api/banlist":
+            lines = [b["ip"] for b in ban_list_active()]
+            return self._send("\n".join(lines) + ("\n" if lines else ""),
+                              "text/plain")
         if u.path == "/api/summary":
             try:
                 host = (q.get("host", [""])[0] or "")[:64] or None
@@ -1233,6 +2055,8 @@ class H(BaseHTTPRequestHandler):
             d = ip_detail(ip)
             d["flag"] = flag(d.get("cc", ""))
             d["history"] = ip_history(ip, host=host)
+            d["ban"] = ban_state(ip)
+            d["reports"] = report_state(ip)
             return self._send(json.dumps(d), "application/json")
         if u.path == "/api/tail":
             filt = (q.get("q", [""])[0] or "")[:64].lower()
@@ -1340,9 +2164,52 @@ class H(BaseHTTPRequestHandler):
                                                      max_age=OIDC_SESSION_TTL)),
                            ("Set-Cookie", _cookie_str("oidc_state", "", clear=True))])
 
+    def _read_json(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 65536:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, OSError):
+            return {}
+
     def do_POST(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        if u.path == "/api/admin/setup":
+            body = self._read_json()
+            if _local_configured():
+                return self._send(json.dumps({"error": "setup closed"}),
+                                  "application/json", 410)
+            tok, _ = _setup_token()
+            if not tok or str(body.get("token", "")) != tok:
+                return self._send(json.dumps({"error": "bad setup token"}),
+                                  "application/json", 403)
+            user = str(body.get("user", "")).strip()[:64] or "admin"
+            pw = str(body.get("password", ""))
+            if len(pw) < 8:
+                return self._send(json.dumps({"error": "password too short (min 8)"}),
+                                  "application/json", 400)
+            try:
+                os.makedirs(DATA_DIR, exist_ok=True)
+                with open(ADMIN_FILE, "w") as f:
+                    json.dump({"user": user, "pass_hash": _mint_pass_hash(pw)}, f)
+                try:
+                    os.chmod(ADMIN_FILE, 0o600)
+                except OSError:
+                    pass
+                try:
+                    os.remove(SETUP_TOKEN_FILE)
+                except OSError:
+                    pass
+            except OSError as e:
+                return self._send(json.dumps({"error": type(e).__name__}),
+                                  "application/json", 500)
+            activity_log(user, "setup", "", "initial admin created")
+            return self._send(json.dumps({"ok": True, "user": user}), "application/json")
         if u.path == "/api/recon":
             _, gate = self._gate()
             if gate is not None:
@@ -1368,6 +2235,77 @@ class H(BaseHTTPRequestHandler):
             if isinstance(lines, list) and lines:
                 store_pushed_lines(host, [str(x)[:2000] for x in lines])
             return self._send(json.dumps({"ok": True, "host": host}), "application/json")
+        actor_user, gate = self._gate()
+        if gate is not None:
+            return self._deny(gate)
+        actor = actor_user or "admin"
+        if u.path == "/api/admin/ban":
+            body_get = self._read_json()
+            v = str(body_get.get("ip", ""))
+            if not v and q.get("ip"):
+                v = str(q["ip"][0])
+            ip = v[:45]
+            reason = str(body_get.get("reason", ""))[:200]
+            r = ban_add(ip, reason, "manual", actor)
+            code = 200 if r.get("ok") else 400
+            return self._send(json.dumps(r), "application/json", code)
+        if u.path == "/api/admin/unban":
+            body_get = self._read_json()
+            v = str(body_get.get("ip", ""))
+            if not v and q.get("ip"):
+                v = str(q["ip"][0])
+            ip = v[:45]
+            r = ban_remove(ip, actor)
+            code = 200 if r.get("ok") else 400
+            return self._send(json.dumps(r), "application/json", code)
+        if u.path == "/api/admin/password":
+            body = self._read_json()
+            if AUTH_MODE != "local":
+                return self._send(json.dumps({"error": "password change is local mode only"}),
+                                  "application/json", 400)
+            old = str(body.get("old", ""))
+            new = str(body.get("new", ""))
+            if not _verify_local_password(old):
+                return self._send(json.dumps({"error": "old password wrong"}),
+                                  "application/json", 403)
+            if len(new) < 8:
+                return self._send(json.dumps({"error": "password too short (min 8)"}),
+                                  "application/json", 400)
+            if AUTH_PASS_HASH or _AUTH_PASSWORD:
+                return self._send(json.dumps({"error": "env credential in use: set AUTH_PASS_HASH instead"}),
+                                  "application/json", 409)
+            try:
+                f = _read_admin_file()
+                user = f.get("user", "") or _effective_local_user()
+                with open(ADMIN_FILE, "w") as fh:
+                    json.dump({"user": user, "pass_hash": _mint_pass_hash(new)}, fh)
+                try:
+                    os.chmod(ADMIN_FILE, 0o600)
+                except OSError:
+                    pass
+            except OSError as e:
+                return self._send(json.dumps({"error": type(e).__name__}),
+                                  "application/json", 500)
+            activity_log(actor, "password", "", "admin password changed")
+            return self._send(json.dumps({"ok": True}), "application/json")
+        if u.path == "/api/admin/report":
+            body_get = self._read_json()
+            v = str(body_get.get("ip", ""))
+            if not v and q.get("ip"):
+                v = str(q["ip"][0])
+            ip = v[:45]
+            try:
+                hits = int(body_get.get("hits", REPORT_MIN_HITS) or REPORT_MIN_HITS)
+            except (ValueError, TypeError):
+                hits = REPORT_MIN_HITS
+            try:
+                risk = int(body_get.get("risk", REPORT_MIN_RISK) or REPORT_MIN_RISK)
+            except (ValueError, TypeError):
+                risk = REPORT_MIN_RISK
+            band = str(body_get.get("band", "high"))[:20]
+            r = report_ip(ip, hits, risk, band, actor)
+            code = 200 if r.get("ok") else 400
+            return self._send(json.dumps(r), "application/json", code)
         return self._send("not found", "text/plain", 404)
 
     def log_message(self, *a):
@@ -1476,6 +2414,22 @@ if __name__ == "__main__":
             time.sleep(600)
 
     threading.Thread(target=_geo_loop, daemon=True).start()
+    try:
+        db_init()
+    except Exception as e:
+        print("db: init failed (%s)" % type(e).__name__, flush=True)
+    if AUTH_MODE == "local" and not _local_configured():
+        tok = _ensure_setup_token()
+        print("auth: MODE=local setup needed — open Admin setup with one-time token", flush=True)
+        print("auth: token source=%s (file %s or ADMIN_SETUP_TOKEN)" % (
+            "env" if os.environ.get("ADMIN_SETUP_TOKEN", "").strip() else "file",
+            SETUP_TOKEN_FILE), flush=True)
+        if not tok:
+            print("auth: setup token missing — set ADMIN_SETUP_TOKEN", flush=True)
+    threading.Thread(target=_ops_loop, daemon=True).start()
+    print("ops: bans auto=%s threshold=%d/%ds jail=%s reports=%s provider=%s" % (
+        BAN_AUTO, BAN_THRESHOLD, BAN_WINDOW, BAN_JAIL,
+        REPORT_ENABLED, REPORT_PROVIDER), flush=True)
     if AUTH_MODE == "none":
         print("auth: MODE=none (open) — keep 8079 on tailnet/localhost or behind SSO; "
               "set AUTH_MODE=local|forward for login", flush=True)
@@ -1491,7 +2445,8 @@ if __name__ == "__main__":
             flush=True)
     else:
         print("auth: MODE=local user=%s creds=%s" % (
-            AUTH_USER, "configured" if (AUTH_PASS_HASH or _AUTH_PASSWORD) else "MISSING (deny-all)"),
+            _effective_local_user(),
+            "configured" if _local_configured() else "MISSING (deny-all)"),
             flush=True)
     httpd = ThreadingHTTPServer(("0.0.0.0", 8079), H)
     if TLS_CERT and TLS_KEY:

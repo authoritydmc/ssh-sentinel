@@ -90,7 +90,37 @@ curl -s --max-time 20 -f "http://localhost:$AHOST_PORT/api/auth" | grep -q '"loc
 echo "[ OK ] /api/auth reports local mode"
 docker rm -f "$ACONTAINER" >/dev/null 2>&1 || true
 
-echo "[5/5] Built-in OIDC gate (unconfigured IdP fails closed)..."
+echo "[5/6] Public abusers (open feed + page, whitelist honored)..."
+PCONTAINER="${CONTAINER}-pub"
+PHOST_PORT=$(pick_port)
+[ -z "${PHOST_PORT:-}" ] && PHOST_PORT=18082
+docker run -d --name "$PCONTAINER" -p "$PHOST_PORT:8079" \
+  -e HOST_ID=smoke-pub -e AUTH_LOG=/srv/demo/auth.log.sample \
+  -e AUTH_MODE=local -e AUTH_USER=smokeadmin -e AUTH_PASS_HASH="$HASH" \
+  -e ABUSERS_PUBLIC=1 -e WHITELIST_IPS=175.6.158.150 \
+  -v "$PWD/demo/auth.log.sample:/srv/demo/auth.log.sample:ro" \
+  "$IMG" >/dev/null
+sleep 6
+if curl -s --max-time 20 "http://localhost:$PHOST_PORT/api/summary?host=all" | grep -q '"total"'; then
+  echo "[FAIL] summary open despite local mode"; exit 1
+fi
+echo "[ OK ] /api/summary still gated"
+ABPUB=$(curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/api/abusers?per_page=50")
+echo "$ABPUB" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+assert d['total'] >= 1, d
+assert not any(a['ip'] == '175.6.158.150' for a in d['abusers']), 'whitelisted IP listed'
+assert all(a['hits'] >= 5 and a['risk'] >= 25 and a['band'] in ('low','medium','high','critical') for a in d['abusers']), 'quality bar'
+print('[ OK ] /api/abusers open, whitelisted IP absent, scored')
+"
+curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/abusers" | grep -q 'public abusers'
+echo "[ OK ] /abusers leaderboard page open"
+curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/api/self" | grep -q '"ip"'
+echo "[ OK ] /api/self open"
+docker rm -f "$PCONTAINER" >/dev/null 2>&1 || true
+
+echo "[6/6] Built-in OIDC gate (unconfigured IdP fails closed)..."
 OCONTAINER="${CONTAINER}-oidc"
 OHOST_PORT=$(pick_port)
 [ -z "${OHOST_PORT:-}" ] && OHOST_PORT=18081

@@ -1,10 +1,11 @@
 import {
   Activity, AlertTriangle, CheckCircle2, ChevronLeft, Crosshair, Eye, GitBranch, Globe2,
   LayoutDashboard, ListOrdered, Map as MapIcon, Pause, Play, Radio, Search,
-  Server, ShieldAlert, ShieldCheck, Users,
+  Server, ShieldAlert, ShieldCheck, ShieldHalf, Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Suspense, lazy } from 'react';
+const Admin = lazy(() => import('./components/Admin'));
 const TrendChart = lazy(() => import('./components/charts').then(m => ({ default: m.TrendChart })));
 const RegionChart = lazy(() => import('./components/charts').then(m => ({ default: m.RegionChart })));
 const AuthDonut = lazy(() => import('./components/charts').then(m => ({ default: m.AuthDonut })));
@@ -12,10 +13,10 @@ const WorldMap = lazy(() => import('./components/charts').then(m => ({ default: 
 import { Badge, Card, Empty, MetricCard, Skeleton } from './components/ui';
 const AttackerModal = lazy(() => import('./components/AttackerModal'));
 import { eventTone, } from './components/ui';
-import { REPO_URL, TZ, fetchAuth, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type Summary } from './lib/api';
+import { REPO_URL, TZ, fetchAuth, fetchSelf, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type SelfInfo, type Summary } from './lib/api';
 import { clsx } from 'clsx';
 
-type View = 'overview' | 'attackers' | 'events';
+type View = 'overview' | 'attackers' | 'events' | 'admin';
 
 function useSummary(host: string) {
   const [data, setData] = useState<Summary | null>(null);
@@ -40,6 +41,7 @@ const NAV: { id: View; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={17} /> },
   { id: 'attackers', label: 'Attackers', icon: <Crosshair size={17} /> },
   { id: 'events', label: 'Live events', icon: <Activity size={17} /> },
+  { id: 'admin', label: 'Admin', icon: <ShieldHalf size={17} /> },
 ];
 
 export default function App() {
@@ -53,6 +55,13 @@ export default function App() {
   useEffect(() => {
     let live = true;
     fetchAuth().then((a) => { if (live) setAuth(a); }).catch(() => { /* banner covers it */ });
+    return () => { live = false; };
+  }, []);
+  const [self, setSelf] = useState<SelfInfo | null>(null);
+  const [selfHide, setSelfHide] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetchSelf().then((s) => { if (live) setSelf(s); }).catch(() => { /* optional check */ });
     return () => { live = false; };
   }, []);
 
@@ -147,6 +156,13 @@ export default function App() {
         </header>
 
         <main className="flex-1 space-y-4 p-4 md:p-6">
+          {self && self.listed && !selfHide && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#f85149]/50 bg-[#f85149]/10 p-3 text-sm text-[#ff9d97]">
+              <ShieldAlert size={15} />
+              <span>Your IP <b className="font-mono">{self.ip}</b> is on the attacker list ({self.hits} fails, risk {self.risk}/{self.band}). If this is you, contact the admin to whitelist you via <code className="rounded bg-white/5 px-1">WHITELIST_IPS</code>.</span>
+              <button onClick={() => setSelfHide(true)} className="ml-auto rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white ring-1 ring-inset ring-white/10 hover:bg-white/10">Dismiss</button>
+            </div>
+          )}
           {err && err.includes('401') && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#d29922]/50 bg-[#d29922]/10 p-3 text-sm text-[#e8b93e]">
               <ShieldAlert size={15} />
@@ -158,6 +174,13 @@ export default function App() {
             </div>
           )}
           {err && !err.includes('401') && <div className="rounded-xl border border-[#f85149]/50 bg-[#f85149]/10 p-3 text-sm text-[#ff9d97]">Backend unreachable: {err}</div>}
+          {auth?.setup_needed && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#d29922]/50 bg-[#d29922]/10 p-3 text-sm text-[#e8b93e]">
+              <ShieldAlert size={15} />
+              <span>First setup needed — open <b>Admin</b> to create the admin login with the one-time token.</span>
+              <button onClick={() => setView('admin')} className="ml-auto rounded-lg bg-[#58a6ff]/20 px-2.5 py-1 text-xs font-medium text-white ring-1 ring-inset ring-[#58a6ff]/50 hover:bg-[#58a6ff]/30">Open Admin</button>
+            </div>
+          )}
 
           {view === 'overview' && (
             <>
@@ -218,6 +241,12 @@ export default function App() {
           )}
 
           {view === 'events' && <EventFeed host={host} />}
+
+          {view === 'admin' && (
+            <Suspense fallback={<Skeleton className="h-64" />}>
+              <Admin />
+            </Suspense>
+          )}
           {host !== 'all' && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#58a6ff]/30 bg-[#58a6ff]/10 px-3 py-2 text-xs text-[#a5d6ff]">
               <Server size={13} />
@@ -241,6 +270,11 @@ export default function App() {
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white">
             <GitBranch size={12} /> ssh-sentinel{auth?.version ? ` v${auth.version}` : ''}
           </a>
+          {auth?.abusers_public && (
+            <a href="abusers" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white" title="Public attacker leaderboard">
+              <ShieldAlert size={12} /> abusers
+            </a>
+          )}
           <span className="ml-auto">times in {TZ}</span>
         </footer>
       </div>
