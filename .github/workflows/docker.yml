@@ -44,7 +44,7 @@ jobs:
 
       - name: Docker metadata (semver + latest + prod.sha)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ secrets.DOCKER_HUB_USERNAME }}/${{ env.IMAGE_NAME }}
