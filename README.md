@@ -39,9 +39,13 @@ configures, deploys, and verifies. It obeys [`AGENTS.md`](AGENTS.md).
 
 ## 📸 Gallery
 
-| Fleet overview + compromise banner | Attacker intel modal |
-| ---------------------------------------- | ---------------------- |
-| ![Fleet overview with metrics, suspicious-login banner, and trends](docs/screenshots/overview.png) | ![Attacker intel modal with geo, ASN, tried users, and recon](docs/screenshots/attacker-intel.png) |
+| Fleet overview + compromise banner | Recon findings on an attacker |
+| ---------------------------------------- | ------------------------------- |
+| ![Fleet overview with metrics, suspicious-login banner, and trends](docs/screenshots/overview.png) | ![Attacker intel modal with geo, ASN, tried users, and recon findings](docs/screenshots/recon-findings.png) |
+
+| Recon scan running |
+| ------------------ |
+| ![Attacker intel modal while a recon scan runs](docs/screenshots/recon-running.png) |
 
 ## 🎯 Use cases
 

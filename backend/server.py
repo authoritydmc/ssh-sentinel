@@ -283,6 +283,9 @@ try:
 except ValueError:
     ABUSERS_RPM = 60
 ABUSERS_TTL = 60
+# ABUSERS_PUBLIC=1 exposes the safe-fields feed + leaderboard without login.
+# Data is attacker-only by construction (no logins, hostnames, private IPs).
+ABUSERS_PUBLIC = os.environ.get("ABUSERS_PUBLIC", "").strip().lower() in ("1", "yes", "true", "on")
 # Optional in-repo TLS (TLS 1.3 only). Off unless both point at files.
 # Preferred fleet path stays: Tailscale cert on central + https CENTRAL_URL.
 TLS_CERT = os.environ.get("TLS_CERT", "").strip()
@@ -321,7 +324,8 @@ def auth_status(user=None):
     return {"mode": AUTH_MODE, "login": login,
             "user": user or None,
             "safe": AUTH_MODE in ("local", "forward", "oidc"),
-            "version": os.environ.get("APP_VERSION", "dev")}
+            "version": os.environ.get("APP_VERSION", "dev"),
+            "abusers_public": ABUSERS_PUBLIC}
 
 
 def health():
