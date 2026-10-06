@@ -73,6 +73,7 @@ AUTH_MODE = os.environ.get("AUTH_MODE", "local").strip().lower()
 if AUTH_MODE not in ("local", "forward", "oidc", "none"):
     AUTH_MODE = "local"
 AUTH_USER = os.environ.get("AUTH_USER", "admin").strip() or "admin"
+_AUTH_USER_ENV = os.environ.get("AUTH_USER", "").strip()
 AUTH_PASS_HASH = os.environ.get("AUTH_PASS_HASH", "").strip()
 _AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 AUTH_ALLOWED_USERS = {p.strip() for p in os.environ.get("AUTH_ALLOWED_USERS", "").split(",") if p.strip()}
@@ -124,8 +125,8 @@ def _read_admin_file():
 
 
 def _effective_local_user():
-    if AUTH_USER:
-        return AUTH_USER
+    if _AUTH_USER_ENV:
+        return _AUTH_USER_ENV
     f = _read_admin_file()
     return f.get("user", "admin")
 
@@ -1847,7 +1848,7 @@ class H(BaseHTTPRequestHandler):
         user, _, pw = creds.partition(":")
         if not user or not pw:
             return ""
-        expect_user = AUTH_USER or _read_admin_file().get("user", "") or "admin"
+        expect_user = _effective_local_user()
         if user != expect_user:
             return ""
         return user if _verify_local_password(pw) else ""
