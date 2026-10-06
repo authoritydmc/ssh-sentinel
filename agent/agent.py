@@ -19,6 +19,22 @@ AGENT_ID = os.environ.get("AGENT_ID", socket.gethostname().split(".")[0])
 LOG = os.environ.get("AUTH_LOG", "/var/log/auth.log")
 EVERY = int(os.environ.get("PUSH_EVERY", "10"))
 STATE_FILE = os.environ.get("AGENT_STATE", "/var/lib/ssh-sentinel-agent/state.json")
+# SHIP_FILTER=sshd-only (default): only ship sshd + pam_unix(sshd:session) lines.
+# Drops sudo COMMAND/PWD, CRON, systemd noise that leaks internal paths/args.
+# Set to "full" only for debugging. Accepted logins are ALWAYS shipped fully
+# (IP + user) so a brute-forcer that guesses correctly stays visible.
+SHIP_FILTER = os.environ.get("SHIP_FILTER", "sshd-only").strip().lower()
+
+
+def keep_line(ln):
+    if SHIP_FILTER == "full":
+        return True
+    l = ln.lower()
+    if "sshd" in l:
+        return True
+    if "pam_unix(sshd" in l:
+        return True
+    return False
 
 
 def load_state():
@@ -58,28 +74,32 @@ def read_new(st):
 
 
 def push(lines):
-    data = json.dumps({"host": AGENT_ID, "lines": lines[-2000:]}).encode()
+    # Filter client-side to save bandwidth + avoid leaking sudo/CRON details.
+    # Accepted lines are kept verbatim (compromise detection needs full IP/user).
+    filtered = [ln for ln in lines if keep_line(ln)]
+    data = json.dumps({"host": AGENT_ID, "lines": filtered[-2000:]}).encode()
     req = urllib.request.Request(
         CENTRAL + "/api/agent/push", data=data,
         headers={"Content-Type": "application/json",
                  "Authorization": "Bearer " + TOKEN,
                  "User-Agent": "ssh-sentinel-agent/1.0"})
     with urllib.request.urlopen(req, timeout=30) as r:
-        return r.status, r.read()[:200]
+        return r.status, r.read()[:200], len(filtered), len(lines) - len(filtered)
 
 
 def main():
     if not TOKEN:
         raise SystemExit("AGENT_TOKEN is empty — join via central: server.py gentoken %s" % AGENT_ID)
     st = load_state()
-    print("agent %s -> %s every %ss" % (AGENT_ID, CENTRAL, EVERY), flush=True)
+    print("agent %s -> %s every %ss filter=%s" % (AGENT_ID, CENTRAL, EVERY, SHIP_FILTER), flush=True)
     backoff = 5
     while True:
         lines, st = read_new(st)
         if lines:
             try:
-                status, body = push(lines)
-                print("pushed %d lines -> %s %s" % (len(lines), status, body.decode()[:80]), flush=True)
+                status, body, kept, dropped = push(lines)
+                extra = " (%d non-sshd dropped)" % dropped if dropped else ""
+                print("pushed %d lines%s -> %s %s" % (kept, extra, status, body.decode()[:80]), flush=True)
                 save_state(st)
                 backoff = 5
             except Exception as e:

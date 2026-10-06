@@ -15,6 +15,7 @@ CENTRAL_URL=$CENTRAL_URL
 AGENT_TOKEN=$AGENT_TOKEN
 AGENT_ID=$AGENT_ID
 PUSH_EVERY=10
+SHIP_FILTER=${SHIP_FILTER:-sshd-only}
 EOF
 chmod 0600 /etc/ssh-sentinel-agent/env
 cat > /etc/systemd/system/ssh-sentinel-agent.service <<'EOF'
