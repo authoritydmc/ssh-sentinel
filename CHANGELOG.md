@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- About dialog: footer version button opens version, short commit, and full changelog (`GET /api/version`, always open). `VERSION` + `CHANGELOG.md` now ship inside the image. `auth_status` and `/api/health` fall back to the `VERSION` file when `APP_VERSION` is unset.
 - Bundled SpiderFoot OSINT for recon: compose `--profile recon` starts `spiderfoot/spiderfoot:latest` (loopback UI, persisted volume). Central wires `SPIDERFOOT_URL` + `RECON_MODULES` automatically. Unreachable backend now reports the exact URL plus the start command.
 - Built-in SSO (`AUTH_MODE=oidc`): authorization-code flow against any OIDC provider (Authentik tested pattern), RS256 ID-token verify, server sessions, `/oidc/logout`, UI "Sign in with SSO" button. Covered by `scripts/selftest_oidc.py` (RFC 7515 vector, runs in CI).
 - Open `/api/health` for uptime monitors (status, uptime, version, mode, hosts, log/data checks); `/healthz` stays plain `ok`.

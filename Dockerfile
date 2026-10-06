@@ -17,6 +17,8 @@ WORKDIR /srv
 COPY backend/server.py ./server.py
 COPY agent/agent.py ./agent.py
 COPY docker/entrypoint.sh ./entrypoint.sh
+COPY VERSION ./VERSION
+COPY CHANGELOG.md ./CHANGELOG.md
 COPY --from=web /build/dist ./dist
 RUN chmod +x /srv/entrypoint.sh
 EXPOSE 8079

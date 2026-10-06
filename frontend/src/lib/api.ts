@@ -41,6 +41,8 @@ async function get<T>(p: string): Promise<T> {
 export interface Host { id: string; local: boolean; last_seen: number; online: boolean; lines?: number }
 export const fetchHosts = () => get<Host[]>('hosts');
 export interface AuthInfo { mode: string; login: string; user: string | null; safe: boolean; version?: string; setup_needed?: boolean; abusers_public?: boolean }
+export interface VersionInfo { version: string; commit: string; changelog: string }
+export const fetchVersion = () => get<VersionInfo>('version');
 export const REPO_URL = 'https://github.com/authoritydmc/ssh-sentinel';
 export interface SelfInfo {
   ip: string; whitelisted: boolean; listed: boolean; hits: number;
