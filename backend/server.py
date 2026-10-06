@@ -68,7 +68,39 @@ AUTH_USER = os.environ.get("AUTH_USER", "admin").strip() or "admin"
 AUTH_PASS_HASH = os.environ.get("AUTH_PASS_HASH", "").strip()
 _AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 AUTH_ALLOWED_USERS = {p.strip() for p in os.environ.get("AUTH_ALLOWED_USERS", "").split(",") if p.strip()}
-FWD_USER_HEADERS = ("X-Forwarded-User", "X-Forwarded-Email", "Remote-User")
+FWD_USER_HEADERS = ("X-Forwarded-User", "X-Forwarded-Email", "Remote-User",
+                    "Cf-Access-Authenticated-User-Email", "X-Auth-Request-User")
+# Networks allowed to present SSO identity headers (spoof-safe ForwardAuth).
+# Defaults cover loopback + RFC1918 (docker/traefik) + Tailscale CGNAT.
+_TRUSTED_PROXIES_RAW = os.environ.get(
+    "AUTH_TRUSTED_PROXIES",
+    "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10")
+
+
+def _trusted_proxy_nets():
+    nets = []
+    for part in _TRUSTED_PROXIES_RAW.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            pass
+    return nets
+
+
+_TRUSTED_PROXY_NETS = _trusted_proxy_nets()
+
+
+def _via_trusted_proxy(addr):
+    if not _TRUSTED_PROXY_NETS:
+        return False
+    try:
+        ip = ipaddress.ip_address(addr.split("%")[0])
+    except ValueError:
+        return False
+    return any(ip in n for n in _TRUSTED_PROXY_NETS)
 # Public abusers feed: per-client RPM budget (in-memory, per process).
 try:
     ABUSERS_RPM = max(1, int(os.environ.get("ABUSERS_RPM", "60")))
@@ -238,6 +270,16 @@ IP_CACHE = "/tmp/sshlog_ipcache.json"
 IP_TTL = 7 * 86400
 SPIDER = os.environ.get("SPIDERFOOT_URL", "http://spiderfoot:5001").rstrip("/")
 RECON_MODULES = os.environ.get("RECON_MODULES", "sfp_dnsresolve,sfp_whois,sfp_ipapico,sfp_abusech")
+# Recon providers: spiderfoot (default) | webhook (your own intel hook) | none.
+# Webhook contract: POST {"ip": "1.2.3.4"} -> {"findings": [{"type": "...",
+# "data": "...", "module": "..."}]} (keys type/data/module also accept
+# eventType/finding|value|info and source/provider aliases). Optional bearer
+# via RECON_WEBHOOK_TOKEN.
+RECON_PROVIDER = os.environ.get("RECON_PROVIDER", "spiderfoot").strip().lower()
+if RECON_PROVIDER not in ("spiderfoot", "webhook", "none"):
+    RECON_PROVIDER = "spiderfoot"
+RECON_WEBHOOK_URL = os.environ.get("RECON_WEBHOOK_URL", "").rstrip("/")
+RECON_WEBHOOK_TOKEN = os.environ.get("RECON_WEBHOOK_TOKEN", "")
 RECON_TTL = 7 * 86400
 # Event types worth showing inline (SpiderFoot result rows are
 # [ts, data, source, module, .., type, ..]; ROOT + self-echo filtered out).
@@ -255,17 +297,65 @@ def spider(path, data=None, timeout=20):
     return http_form(url, data, timeout=timeout)
 
 
-def recon_status(ip, force=False):
-    """Auto-fire SpiderFoot recon for ip, cache results, report state.
+def _recon_webhook(key, ip, force=False):
+    """POST the IP to a generic intel hook, normalize findings, cache 7d."""
+    if not RECON_WEBHOOK_URL:
+        return {"state": "error", "error": "RECON_WEBHOOK_URL is empty"}
+    headers = {"Content-Type": "application/json",
+               "User-Agent": "ssh-sentinel-recon/1.0"}
+    if RECON_WEBHOOK_TOKEN:
+        headers["Authorization"] = "Bearer " + RECON_WEBHOOK_TOKEN
+    try:
+        req = urllib.request.Request(
+            RECON_WEBHOOK_URL, data=json.dumps({"ip": ip}).encode(),
+            headers=headers)
+        with urllib.request.urlopen(req, timeout=25) as r:
+            payload = json.load(r)
+    except Exception as e:
+        return {"state": "error", "error": "webhook failed: " + type(e).__name__}
+    items = []
+    if isinstance(payload, dict):
+        items = payload.get("findings") or payload.get("results") or []
+    elif isinstance(payload, list):
+        items = payload
+    seen, out = set(), []
+    for f in items:
+        if not isinstance(f, dict):
+            continue
+        typ = str(f.get("type") or f.get("eventType") or "FINDING")
+        data = str(f.get("data") or f.get("finding") or f.get("value")
+                   or f.get("info") or "").strip()
+        mod = str(f.get("module") or f.get("source") or f.get("provider")
+                  or "webhook")
+        if not data or (typ, data) in seen:
+            continue
+        seen.add((typ, data))
+        out.append({"type": typ[:64], "data": data[:300], "module": mod[:64]})
+        if len(out) >= 60:
+            break
+    d = {"state": "done", "scan": "webhook", "status": "FINISHED", "done": True,
+         "ts": time.time(), "count": len(out), "results": out}
+    _cache[key] = d
+    save_cache()
+    return d
 
-    Returns dict(state= cached|started|running|done|error, ...). GET callers
-    poll until state == done; results render inline in the sshlog modal.
+
+def recon_status(ip, force=False):
+    """Auto-fire recon for ip via RECON_PROVIDER, cache results, report state.
+
+    Returns dict(state= cached|started|running|done|error, ...). Callers
+    poll until state == done; results render inline in the intel modal.
     """
     key = "recon:" + ip
     ent = _cache.get(key, {})
     if ent.get("done") and not force and time.time() - ent.get("ts", 0) < RECON_TTL:
         ent["state"] = "cached"
         return ent
+    if RECON_PROVIDER == "none":
+        return {"state": "done", "scan": "disabled", "status": "DISABLED",
+                "done": False, "ts": time.time(), "count": 0, "results": []}
+    if RECON_PROVIDER == "webhook":
+        return _recon_webhook(key, ip, force)
     try:
         scans = spider("/scanlist", timeout=15) or []
     except Exception as e:
@@ -1249,10 +1339,14 @@ class H(BaseHTTPRequestHandler):
         if AUTH_MODE == "none":
             return None, None
         if AUTH_MODE == "forward":
+            if not _via_trusted_proxy(self.client_address[0]):
+                return None, (401, "untrusted proxy: SSO identity only accepted "
+                                   "from AUTH_TRUSTED_PROXIES")
             u = self._forward_user()
             if not u:
-                return None, (401, "missing X-Forwarded-User: ForwardAuth (Authentik) "
-                                   "must pass an authenticated user")
+                return None, (401, "missing SSO identity header: ForwardAuth "
+                                   "(Authentik/Authelia) or Cloudflare Access must "
+                                   "pass an authenticated user")
             if AUTH_ALLOWED_USERS and u not in AUTH_ALLOWED_USERS \
                     and u.split("@")[0] not in AUTH_ALLOWED_USERS:
                 return None, (403, "user not allowed")
@@ -1520,8 +1614,10 @@ if __name__ == "__main__":
         print("auth: MODE=none (open) — keep 8079 on tailnet/localhost or behind SSO; "
               "set AUTH_MODE=local|forward for login", flush=True)
     elif AUTH_MODE == "forward":
-        print("auth: MODE=forward (ForwardAuth/OIDC via X-Forwarded-User%s)" % (
-            " allowlist=%d" % len(AUTH_ALLOWED_USERS) if AUTH_ALLOWED_USERS else ""), flush=True)
+        print("auth: MODE=forward (ForwardAuth/OIDC via %s%s, proxies=%d nets)" % (
+            ",".join(FWD_USER_HEADERS[:2]),
+            " allowlist=%d" % len(AUTH_ALLOWED_USERS) if AUTH_ALLOWED_USERS else "",
+            len(_TRUSTED_PROXY_NETS)), flush=True)
     else:
         print("auth: MODE=local user=%s creds=%s" % (
             AUTH_USER, "configured" if (AUTH_PASS_HASH or _AUTH_PASSWORD) else "MISSING (deny-all)"),

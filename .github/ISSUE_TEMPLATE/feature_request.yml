@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose an intel source, auth provider, or UI idea
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [intel/recon provider, auth/SSO, abusers API, dashboard UI, agent, ops/docker, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / scenario
+      description: Who needs this and when? (scenario-level context helps UX review)
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: API shape, env vars, or UI sketch
+  - type: checkboxes
+    id: contrib
+    attributes:
+      label: Contribution
+      options:
+        - label: I can submit a PR for this

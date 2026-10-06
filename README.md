@@ -114,7 +114,31 @@ labels:
 # central env for that setup
 AUTH_MODE=forward
 AUTH_ALLOWED_USERS=alice,bob@example.com   # optional allowlist
+# headers are only honored from AUTH_TRUSTED_PROXIES (spoof-safe by default)
 ```
+
+Or copy-paste ready: [`examples/sso-traefik-authentik.yml`](examples/sso-traefik-authentik.yml)
+
+```bash
+SSO_HOST=ssh.example.com AUTH_ALLOWED_USERS=alice@example.com \
+  docker compose -f docker-compose.yml -f examples/sso-traefik-authentik.yml up -d --build
+```
+
+Other SSO front doors that work with `AUTH_MODE=forward` (no code changes):
+
+| Provider | How |
+| -------- | --- |
+| Authelia + Traefik/Nginx | ForwardAuth `authResponseHeaders: Remote-User, Remote-Email` — trusted `Remote-User` header is already accepted |
+| Cloudflare Access + `cloudflared` | Access policy on the hostname; central accepts `Cf-Access-Authenticated-User-Email` (cloudflared talks to loopback, inside default trusted proxies) |
+| Tailscale Serve | keep `AUTH_MODE=none` on tailnet-only `:8079` (identity = tailnet), or put Authentik in front as above |
+
+## 🔍 Recon providers (attacker enrichment)
+
+Click any IP → **Recon** auto-enriches via `RECON_PROVIDER`:
+
+- `spiderfoot` (default): needs a reachable `SPIDERFOOT_URL`; tune with `RECON_MODULES`. Unreachable backend → clean `error` state, never blocks the UI.
+- `webhook`: plug **any** probing service — POST `{"ip": "1.2.3.4"}` to `RECON_WEBHOOK_URL` (optional `RECON_WEBHOOK_TOKEN` bearer), return `{"findings": [{"type": "ASN", "data": "AS…", "module": "my-source"}]}`. Accepts `eventType`/`finding`/`value`/`info` and `source`/`provider` aliases. Results cached 7d like SpiderFoot scans.
+- `none`: recon section reports disabled (no external calls at all).
 
 ### Option C — demo (any machine, 2 min, no real logs)
 
@@ -215,6 +239,9 @@ curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 | `AUTH_PASS_HASH` | `` | central | `pbkdf2-sha256$…` from `docker exec ssh-sentinel python3 /srv/server.py genhash` (preferred over `AUTH_PASSWORD`) |
 | `AUTH_PASSWORD` | `` | central | Plaintext fallback (never logged); prefer the hash |
 | `AUTH_ALLOWED_USERS` | `` | central | Optional allowlist for forward mode, e.g. `alice,bob@example.com` |
+| `AUTH_TRUSTED_PROXIES` | loopback + RFC1918 + Tailscale CGNAT | central | CIDRs allowed to present SSO identity headers (spoof-safe ForwardAuth) |
+| `RECON_PROVIDER` | `spiderfoot` | central | `spiderfoot` (needs `SPIDERFOOT_URL`) \| `webhook` (POST `{ip}` to `RECON_WEBHOOK_URL`, returns `{findings:[{type,data,module}]}`) \| `none` (recon disabled) |
+| `RECON_WEBHOOK_URL` / `RECON_WEBHOOK_TOKEN` | `` | central | Your intel hook (n8n, custom API…) + optional Bearer |
 | `ABUSERS_RPM` | `60` | central | `/api/abusers` per-client-IP requests/minute (`429` past budget) |
 | `TLS_CERT` / `TLS_KEY` | `` | central | Container paths to PEM cert/key — enables in-repo TLS 1.3-only listener (else terminate at Tailscale/Traefik) |
 
@@ -234,7 +261,7 @@ Files:
 Read [`SECURITY.md`](SECURITY.md) before exposing anything.
 
 - Login is **fail-closed by default** (`AUTH_MODE=local`): UI + read APIs need HTTP Basic (`AUTH_USER` + `AUTH_PASS_HASH`/`AUTH_PASSWORD`); `/healthz` and `/api/auth` stay open. No credential configured → deny-all with a setup hint.
-- `AUTH_MODE=forward`/`oidc` trusts `X-Forwarded-User` from Authentik-via-Traefik ForwardAuth (Dozzle-oidc pattern); optional `AUTH_ALLOWED_USERS` allowlist; else `403`.
+- `AUTH_MODE=forward`/`oidc` trusts SSO identity headers (`X-Forwarded-User`/`Email`, Authelia `Remote-User`, Cloudflare Access email) from Authentik-via-Traefik ForwardAuth (Dozzle-oidc pattern) **only when the connection comes from `AUTH_TRUSTED_PROXIES`** (spoof-safe); optional `AUTH_ALLOWED_USERS` allowlist; else `401`/`403`.
 - `AUTH_MODE=none` is the explicit open flag for private tailnet/demo only.
 - Agents push outbound only (no inbound ports on members).
 - Bearer per-host tokens in `data/agents.json` (`0600`); Tailscale gives WireGuard identity + encryption. Optional in-repo TLS 1.3-only listener via `TLS_CERT`/`TLS_KEY`; agent `CENTRAL_URL=https://…` already verifies with system roots.

@@ -1,0 +1,35 @@
+name: Bug report
+description: Something broken in central, agent, or UI
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version / image tag
+      description: e.g. v0.3.0, latest, or commit SHA (+ `docker inspect` digest if handy)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [dashboard UI, backend API, agent shipper, auth/SSO, recon, abusers API, docker/compose, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw vs what you expected. Paste redacted logs (no tokens, no real passwords).
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Commands / env (AUTH_MODE, RECON_PROVIDER…) that trigger it
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, docker version, single host or fleet, behind Traefik/Authentik?

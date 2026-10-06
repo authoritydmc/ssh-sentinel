@@ -1,0 +1,49 @@
+# SSH Sentinel behind Traefik + Authentik (ForwardAuth / OIDC).
+# Usage: docker compose -f docker-compose.yml -f examples/sso-traefik-authentik.yml up -d --build
+# Assumes an Authentik outpost named "authentik" on the same docker network.
+# Central runs AUTH_MODE=forward and trusts ONLY the proxy network (see
+# AUTH_TRUSTED_PROXIES); direct :8079 hits without the SSO headers get 401.
+name: ssh-sentinel-sso
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: ssh-traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - sso
+
+  central:
+    networks:
+      - sso
+    environment:
+      AUTH_MODE: forward
+      AUTH_ALLOWED_USERS: ${AUTH_ALLOWED_USERS:-}
+      # Trust headers only from traefik/docker + tailnet (spoof-safe).
+      AUTH_TRUSTED_PROXIES: 127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ssh.rule=Host(`${SSO_HOST:-ssh.example.com}`)"
+      - "traefik.http.routers.ssh.entrypoints=websecure"
+      - "traefik.http.routers.ssh.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.ssh.middlewares=authentik@docker"
+      - "traefik.http.routers.ssh.service=ssh-sentinel"
+      - "traefik.http.services.ssh-sentinel.loadbalancer.server.port=8079"
+      - "traefik.http.middlewares.authentik.forwardauth.address=http://authentik:9000/outpost.goauthentik.io/auth/traefik"
+      - "traefik.http.middlewares.authentik.forwardauth.trustForwardHeader=true"
+      - "traefik.http.middlewares.authentik.forwardauth.authResponseHeaders=X-Forwarded-User,X-Forwarded-Email"
+    # Do NOT publish 8079 to the host here — traefik is the only ingress.
+
+networks:
+  sso:
+    driver: bridge

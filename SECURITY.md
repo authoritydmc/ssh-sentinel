@@ -29,8 +29,10 @@ SSH Sentinel is designed to run on a **private tailnet or localhost**:
   (Tailscale Serve, Cloudflare Access, Authelia, Traefik + Authentik).
 - **Login modes** (`AUTH_MODE`, default `local` fail-closed): `local` = HTTP Basic
   against `AUTH_USER` + `AUTH_PASS_HASH` (mint with `server.py genhash`) or
-  `AUTH_PASSWORD`; `forward`/`oidc` = trust `X-Forwarded-User` from
-  Authentik-via-Traefik ForwardAuth with optional `AUTH_ALLOWED_USERS`;
+  `AUTH_PASSWORD`;   `forward`/`oidc` = trust SSO identity headers from
+  Authentik-via-Traefik ForwardAuth (also Authelia `Remote-User`, Cloudflare
+  Access email) **only from `AUTH_TRUSTED_PROXIES`** (default loopback +
+  RFC1918 + Tailscale), with optional `AUTH_ALLOWED_USERS`;
   `none` = explicit open mode for private networks/demo only. `/healthz` and
   `/api/auth` stay open; agent push keeps its own per-host Bearer tokens.
 - **`/api/abusers`** exposes attacker IPs only (hits, first/last, attempted
