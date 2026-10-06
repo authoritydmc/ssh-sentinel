@@ -32,3 +32,4 @@ jobs:
           python-version: "3.12"
       - run: python3 -m compileall -q backend/server.py agent/agent.py demo/gen_auth_log.py
       - run: python3 demo/gen_auth_log.py && test -s demo/auth.log.sample
+      - run: python3 scripts/selftest_oidc.py

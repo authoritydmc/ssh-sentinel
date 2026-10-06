@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Built-in SSO (`AUTH_MODE=oidc`): authorization-code flow against any OIDC provider (Authentik tested pattern), RS256 ID-token verify, server sessions, `/oidc/logout`, UI "Sign in with SSO" button. Covered by `scripts/selftest_oidc.py` (RFC 7515 vector, runs in CI).
+- Open `/api/health` for uptime monitors (status, uptime, version, mode, hosts, log/data checks); `/healthz` stays plain `ok`.
+- Removed the legacy single-file `PAGE` fallback (React `dist/` is the only UI; missing build returns `404`).
+
 ## [0.3.0] - 2026-10-06
 
 ### Added
