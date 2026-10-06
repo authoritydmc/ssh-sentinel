@@ -33,6 +33,8 @@ services:
       OIDC_SESSION_SECRET: ${OIDC_SESSION_SECRET:-}
       OIDC_COOKIE_SECURE: ${OIDC_COOKIE_SECURE:-}
       RECON_PROVIDER: ${RECON_PROVIDER:-spiderfoot}
+      SPIDERFOOT_URL: ${SPIDERFOOT_URL:-http://spiderfoot:5001}
+      RECON_MODULES: ${RECON_MODULES:-sfp_dnsresolve,sfp_whois,sfp_ipapico,sfp_abusech}
       RECON_WEBHOOK_URL: ${RECON_WEBHOOK_URL:-}
       RECON_WEBHOOK_TOKEN: ${RECON_WEBHOOK_TOKEN:-}
       ABUSERS_RPM: ${ABUSERS_RPM:-60}
@@ -68,6 +70,24 @@ services:
     volumes:
       - ./demo/auth.log.sample:/srv/demo/auth.log.sample:ro
 
+  # SpiderFoot OSINT for recon (optional, needs --profile recon).
+  #   docker compose --profile recon up -d --build
+  # Central reaches it at http://spiderfoot:5001 by default.
+  # UI binds loopback only (no auth in SpiderFoot). Set
+  # SPIDERFOOT_PORT=5001 to bind all interfaces on a private net.
+  spiderfoot:
+    profiles: ["recon"]
+    image: ${SPIDERFOOT_IMAGE:-spiderfoot/spiderfoot:latest}
+    container_name: ssh-sentinel-spiderfoot
+    restart: unless-stopped
+    expose:
+      - "5001"
+    ports:
+      - "${SPIDERFOOT_PORT:-127.0.0.1:5001}:5001"
+    volumes:
+      - spiderfoot_data:/var/lib/spiderfoot
+    command: python3 ./sf.py -l 0.0.0.0:5001
+
   # Agent mode: same image, ships this host's log to central. Needs a join
   # token first (on central: server.py gentoken <host>), then:
   #   ROLE=agent AGENT_ID=web-01 CENTRAL_URL=https://<central-tailnet>:8079 \
@@ -94,3 +114,4 @@ services:
 volumes:
   sentinel_data:
   sentinel_agent_state:
+  spiderfoot_data:
