@@ -12,6 +12,7 @@ const AuthDonut = lazy(() => import('./components/charts').then(m => ({ default:
 const WorldMap = lazy(() => import('./components/charts').then(m => ({ default: m.WorldMap })));
 import { Badge, Card, Empty, MetricCard, Skeleton } from './components/ui';
 const AttackerModal = lazy(() => import('./components/AttackerModal'));
+const VersionModal = lazy(() => import('./components/VersionModal'));
 import { eventTone, } from './components/ui';
 import { REPO_URL, TZ, fetchAuth, fetchSelf, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type SelfInfo, type Summary } from './lib/api';
 import { MaskProvider, maskHost, maskIp, maskLine, maskUser, useMask } from './components/Mask';
@@ -57,6 +58,7 @@ function Shell() {
   const [view, setView] = useState<View>('overview');
   const [collapsed, setCollapsed] = useState(false);
   const [modalIp, setModalIp] = useState<string | null>(null);
+  const [versionOpen, setVersionOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   useEffect(() => {
@@ -284,9 +286,12 @@ function Shell() {
           <span>geo cache: <b className="text-white">{data?.geo_cached ?? '…'}</b></span>
           <span>self excluded: <b className="text-white">{data?.excluded_self ?? '…'}</b></span>
           <span className="hidden sm:inline">auto-refresh 60s</span>
-          <a href={REPO_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white">
-            <GitBranch size={12} /> ssh-sentinel{auth?.version ? ` v${auth.version}` : ''}
+          <a href={REPO_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white" title="ssh-sentinel on GitHub">
+            <GitBranch size={12} /> repo
           </a>
+          <button onClick={() => setVersionOpen(true)} title="About: version and changelog" className="inline-flex items-center gap-1 hover:text-white">
+            {auth?.version ? `v${auth.version}` : 'version…'}
+          </button>
           {auth?.abusers_public && (
             <a href="abusers" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white" title="Public attacker leaderboard">
               <ShieldAlert size={12} /> abusers
@@ -296,6 +301,7 @@ function Shell() {
         </footer>
       </div>
       {modalIp && <Suspense fallback={null}><AttackerModal ip={modalIp} host={host} onClose={() => setModalIp(null)} /></Suspense>}
+      {versionOpen && <Suspense fallback={null}><VersionModal onClose={() => setVersionOpen(false)} /></Suspense>}
     </div>
   );
 }
