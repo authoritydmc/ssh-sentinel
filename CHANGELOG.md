@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-07
+
 ### Added
 - About dialog: footer version button opens version, short commit, and full changelog (`GET /api/version`, always open). `VERSION` + `CHANGELOG.md` now ship inside the image. `auth_status` and `/api/health` fall back to the `VERSION` file when `APP_VERSION` is unset.
 - Bundled SpiderFoot OSINT for recon: compose `--profile recon` starts `spiderfoot/spiderfoot:latest` (loopback UI, persisted volume). Central wires `SPIDERFOOT_URL` + `RECON_MODULES` automatically. Unreachable backend now reports the exact URL plus the start command.
