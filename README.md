@@ -303,7 +303,7 @@ Files:
 Read [`SECURITY.md`](SECURITY.md) before exposing anything.
 
 - Login is **fail-closed by default** (`AUTH_MODE=local`): UI + read APIs need HTTP Basic (`AUTH_USER` + `AUTH_PASS_HASH`/`AUTH_PASSWORD`); `/healthz` and `/api/auth` stay open. No credential configured → deny-all with a setup hint.
-- `AUTH_MODE=forward`/`oidc` trusts SSO identity headers (`X-Forwarded-User`/`Email`, Authelia `Remote-User`, Cloudflare Access email) from Authentik-via-Traefik ForwardAuth (Dozzle-oidc pattern) **only when the connection comes from `AUTH_TRUSTED_PROXIES`** (spoof-safe); optional `AUTH_ALLOWED_USERS` allowlist; else `401`/`403`.
+- `AUTH_MODE=forward`/`oidc` trusts SSO identity headers (`X-Forwarded-User`/`Email`, Authentik `X-authentik-username`/`X-authentik-email`, Authelia `Remote-User`, Cloudflare Access email) from Authentik-via-Traefik ForwardAuth (Dozzle-oidc pattern) **only when the connection comes from `AUTH_TRUSTED_PROXIES`** (spoof-safe); optional `AUTH_ALLOWED_USERS` allowlist; else `401`/`403`.
 - `AUTH_MODE=none` is the explicit open flag for private tailnet/demo only.
 - Agents push outbound only (no inbound ports on members).
 - Bearer per-host tokens in `data/agents.json` (`0600`); Tailscale gives WireGuard identity + encryption. Optional in-repo TLS 1.3-only listener via `TLS_CERT`/`TLS_KEY`; agent `CENTRAL_URL=https://…` already verifies with system roots.
