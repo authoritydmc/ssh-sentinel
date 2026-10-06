@@ -227,7 +227,7 @@ docker compose --profile demo up --build
 Images publish on every `master` push + tags via GitHub Actions:
 
 - `ghcr.io/authoritydmc/ssh-sentinel:latest` (+ `:sha-<commit>`, semver on tags)
-- `rajlabs/ssh-sentinel:latest` (same tags, requires `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` secrets)
+- `rajlabs/ssh-sentinel:latest` (same tags, requires `DOCKER_HUB_USERNAME` + `DOCKER_HUB_ACCESS_TOKEN` secrets)
 
 ## 📝 Changelog
 
