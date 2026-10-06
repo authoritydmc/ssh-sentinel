@@ -2,6 +2,10 @@
 # One image, two roles. ROLE=central (default) serves the API + UI.
 # ROLE=agent tails AUTH_LOG and pushes to CENTRAL_URL.
 set -eu
+# Explicit command wins: docker run IMG python3 /srv/server.py genhash ...
+if [ $# -gt 0 ]; then
+  exec "$@"
+fi
 ROLE="${ROLE:-central}"
 case "$ROLE" in
   agent)

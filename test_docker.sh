@@ -46,11 +46,11 @@ sleep 6
 docker logs "$CONTAINER" 2>&1 | tail -n 5 || true
 
 echo "[3/4] Health + API checks (incl. public abusers feed)..."
-curl -s -f "http://localhost:$HOST_PORT/healthz" | grep -q ok
+curl -s --max-time 20 -f "http://localhost:$HOST_PORT/healthz" | grep -q ok
 echo "[ OK ] /healthz -> ok"
-SUMMARY=$(curl -s -f "http://localhost:$HOST_PORT/api/summary?host=all")
+SUMMARY=$(curl -s --max-time 20 -f "http://localhost:$HOST_PORT/api/summary?host=all")
 echo "$SUMMARY" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['ips'] >= 1, d; print('[ OK ] /api/summary ips=%d total=%d' % (d['ips'], d['total']))"
-ABUSERS=$(curl -s -f "http://localhost:$HOST_PORT/api/abusers?per_page=50")
+ABUSERS=$(curl -s --max-time 20 -f "http://localhost:$HOST_PORT/api/abusers?per_page=50")
 echo "$ABUSERS" | python3 -c "
 import json,sys,ipaddress
 d = json.load(sys.stdin)
@@ -74,19 +74,19 @@ docker run -d --name "$ACONTAINER" -p "$AHOST_PORT:8079" \
   -v "$PWD/demo/auth.log.sample:/srv/demo/auth.log.sample:ro" \
   "$IMG" >/dev/null
 sleep 6
-curl -s -f "http://localhost:$AHOST_PORT/healthz" | grep -q ok
+curl -s --max-time 20 -f "http://localhost:$AHOST_PORT/healthz" | grep -q ok
 echo "[ OK ] /healthz open in local mode"
-if curl -s "http://localhost:$AHOST_PORT/api/summary?host=all" | grep -q '"total"'; then
+if curl -s --max-time 20 "http://localhost:$AHOST_PORT/api/summary?host=all" | grep -q '"total"'; then
   echo "[FAIL] /api/summary reachable without credentials"; exit 1
 fi
 echo "[ OK ] /api/summary -> 401 without credentials"
-curl -s -f -u "smokeadmin:smoke-pass" "http://localhost:$AHOST_PORT/api/summary?host=all" | grep -q '"total"'
+curl -s --max-time 20 -f -u "smokeadmin:smoke-pass" "http://localhost:$AHOST_PORT/api/summary?host=all" | grep -q '"total"'
 echo "[ OK ] /api/summary -> 200 with Basic credentials"
-if curl -s -f -u "smokeadmin:wrong" "http://localhost:$AHOST_PORT/api/summary?host=all" >/dev/null 2>&1; then
+if curl -s --max-time 20 -f -u "smokeadmin:wrong" "http://localhost:$AHOST_PORT/api/summary?host=all" >/dev/null 2>&1; then
   echo "[FAIL] wrong password accepted"; exit 1
 fi
 echo "[ OK ] wrong password -> 401"
-curl -s -f "http://localhost:$AHOST_PORT/api/auth" | grep -q '"local"'
+curl -s --max-time 20 -f "http://localhost:$AHOST_PORT/api/auth" | grep -q '"local"'
 echo "[ OK ] /api/auth reports local mode"
 docker rm -f "$ACONTAINER" >/dev/null 2>&1 || true
 
