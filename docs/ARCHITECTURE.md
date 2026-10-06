@@ -25,15 +25,15 @@ It presents the result in a web dashboard.
 
 ```mermaid
 flowchart LR
-    subgraph fleet[Fleet]
-        A1[member: agent] -->|HTTPS + Bearer<br/>outbound only| C[central :8079]
-        A2[member: agent] -->|HTTPS + Bearer<br/>outbound only| C
-        LOG[/var/log/auth.log<br/>central host] --> C
+    subgraph fleet["Fleet"]
+        A1["member agent"] -->|"HTTPS plus Bearer, outbound only"| C["central :8079"]
+        A2["member agent"] -->|"HTTPS plus Bearer, outbound only"| C
+        LOG["auth.log on central host"] --> C
     end
-    C -->|React UI + JSON API| OP[operator]
-    SSO[SSO: Authentik / Authelia / Cloudflare Access] -->|ForwardAuth<br/>identity headers| C
-    C -->|optional| RC[recon provider:<br/>SpiderFoot / webhook]
-    RC -->|geo / RDAP / rDNS| EXT[(ip-api, RDAP, rDNS)]
+    C -->|"React UI plus JSON API"| OP["operator"]
+    SSO["SSO: Authentik, Authelia, Cloudflare Access"] -->|"ForwardAuth identity headers"| C
+    C -->|"optional"| RC["recon provider: SpiderFoot or webhook"]
+    RC -->|"geo, RDAP, rDNS"| EXT[("ip-api, RDAP, rDNS")]
 ```
 
 Rules:
@@ -54,12 +54,12 @@ One image serves two roles. `ROLE` selects the role.
 
 ```mermaid
 flowchart TD
-    IMG[image: rajlabs/ssh-sentinel] --> E{ROLE?}
-    E -->|central| S[server.py<br/>ThreadingHTTPServer]
-    E -->|agent| G[agent.py<br/>tail + push loop]
-    S --> DIST[React dist/]
-    S --> DATA[data/hosts/*.jsonl<br/>agents.json]
-    G -->|Bearer push<br/>every PUSH_EVERY| S
+    IMG["image: rajlabs slash ssh-sentinel"] --> E{"ROLE?"}
+    E -->|"central"| S["server.py ThreadingHTTPServer"]
+    E -->|"agent"| G["agent.py tail plus push loop"]
+    S --> DIST["React dist"]
+    S --> DATA["stored JSONL plus agents.json"]
+    G -->|"Bearer push each PUSH_EVERY"| S
 ```
 
 ## 5. Data flow
@@ -89,17 +89,17 @@ Notes:
 
 ```mermaid
 flowchart TD
-    R([request]) --> H{path?}
-    H -->|/healthz, /api/auth| OK1[allow]
-    H -->|/api/agent/push| BEAR[check Bearer token]
-    H -->|other| M{AUTH_MODE?}
-    M -->|none| OK2[allow: private net only]
-    M -->|local| BA[check HTTP Basic<br/>pbkdf2 hash]
-    M -->|forward / oidc| PX{from trusted proxy<br/>with SSO header?}
-    PX -->|yes| OK3[allow]
-    PX -->|no| D[deny 401/403]
-    BA -->|bad| D
-    BA -->|good| OK3
+    R(["request"]) --> H{"path?"}
+    H -->|"healthz, auth"| OK1["allow"]
+    H -->|"agent push"| BEAR["check Bearer token"]
+    H -->|"other"| M{"AUTH_MODE?"}
+    M -->|"none"| OK2["allow: private net only"]
+    M -->|"local"| BA["check HTTP Basic pbkdf2 hash"]
+    M -->|"forward or oidc"| PX{"from trusted proxy with SSO header?"}
+    PX -->|"yes"| OK3["allow"]
+    PX -->|"no"| D["deny 401 or 403"]
+    BA -->|"bad"| D
+    BA -->|"good"| OK3
 ```
 
 Rules:
@@ -112,11 +112,11 @@ Rules:
 
 ```mermaid
 flowchart TD
-    IP([attacker IP]) --> P{RECON_PROVIDER?}
-    P -->|spiderfoot| SF[SpiderFoot scan<br/>poll to FINISHED]
-    P -->|webhook| WH[POST to hook<br/>normalize findings]
-    P -->|none| OFF[disabled]
-    SF --> K[(cache 7 days)]
+    IP(["attacker IP"]) --> P{"RECON_PROVIDER?"}
+    P -->|"spiderfoot"| SF["SpiderFoot scan, poll to FINISHED"]
+    P -->|"webhook"| WH["POST to hook, normalize findings"]
+    P -->|"none"| OFF["disabled"]
+    SF --> K[("cache 7 days")]
     WH --> K
 ```
 
@@ -150,11 +150,11 @@ receive `{"findings": [{"type": "...", "data": "...", "module": "..."}]}`.
 
 ```mermaid
 flowchart LR
-    DEV[commit to master] --> CI[ci: lint + build + compile]
-    DEV --> SMK[docker: smoke test<br/>open + login + abusers]
-    SMK --> HUB[push :latest + :prod.SHA<br/>to Hub + GHCR]
-    TAG[tag vX.Y.Z<br/>scripts/release.sh] --> SEM[semver images<br/>X.Y.Z, X.Y]
-    TAG --> REL[GitHub Release<br/>notes from CHANGELOG]
+    DEV["commit to master"] --> CI["ci: lint plus build plus compile"]
+    DEV --> SMK["docker smoke test: open, login, abusers"]
+    SMK --> HUB["push latest and prod SHA to Hub plus GHCR"]
+    TAG["tag vX.Y.Z with release script"] --> SEM["semver images X.Y.Z and X.Y"]
+    TAG --> REL["GitHub Release, notes from CHANGELOG"]
 ```
 
 Script `scripts/release.sh` updates `VERSION`, moves the
