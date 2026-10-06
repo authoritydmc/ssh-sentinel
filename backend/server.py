@@ -557,7 +557,9 @@ def recon_status(ip, force=False):
     try:
         scans = spider("/scanlist", timeout=15) or []
     except Exception as e:
-        return {"state": "error", "error": "spiderfoot unreachable: " + type(e).__name__}
+        return {"state": "error", "error": "spiderfoot unreachable at " + SPIDER +
+                " (" + type(e).__name__ + "): start it with "
+                "docker compose --profile recon up -d --build"}
     sid = ent.get("scan") if ent.get("scan") and not force else None
     if not sid:
         for row in scans:
