@@ -58,7 +58,7 @@ assert d['total'] >= 1 and d['abusers'], d
 blob = json.dumps(d['abusers'])
 assert 'Accepted' not in blob, 'accepted logins leaked'
 assert all(ipaddress.ip_address(a['ip']).is_global for a in d['abusers']), 'non-public IP leaked'
-assert set(d['abusers'][0].keys()) <= {'ip','hits','first','last','users','attempted_users','cc','country','city','org','asn','lat','lon','flag'}, d['abusers'][0].keys()
+assert set(d['abusers'][0].keys()) <= {'ip','hits','first','last','users','attempted_users','cc','country','city','org','asn','lat','lon','flag','risk','band','reasons'}, d['abusers'][0].keys()
 print('[ OK ] /api/abusers total=%d safe-fields-only' % d['total'])
 "
 
