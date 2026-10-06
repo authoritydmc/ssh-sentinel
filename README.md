@@ -38,6 +38,8 @@ agent (any server) --tailscale+bearer--> central (main server) --> UI
 
 ## 🏗️ Architecture
 
+Full design (diagrams + procedures, simplified English): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ```
 ┌────────────┐  tail + push (10s)   ┌─────────────────────┐
 │  member-01 │ ── Bearer:TOKEN ───▶ │      central        │
@@ -162,9 +164,14 @@ docker exec ssh-sentinel python3 /srv/server.py gentoken web-01
 # -> host=web-01, token=..., central=http://<this-host>:8079
 ```
 
-**On the joining server** (needs `tailscale status` so it can reach central by tailnet name):
+**On the joining server** (needs `tailscale status` so it can reach central by tailnet name) — pick one role runner:
 
 ```bash
+# Option 1 — container agent (same image, ROLE=agent, no systemd needed)
+ROLE=agent AGENT_ID=web-01 CENTRAL_URL=https://<central-tailnet-name>:8079 \
+AGENT_TOKEN=<token> docker compose --profile agent up -d --build
+
+# Option 2 — host systemd agent
 git clone https://github.com/authoritydmc/ssh-sentinel.git && cd ssh-sentinel
 CENTRAL_URL=http://<central-tailnet-name>:8079 AGENT_TOKEN=<token> sudo -E ./agent/install.sh
 # or without clone: set AGENT_ID explicitly
@@ -272,7 +279,10 @@ Read [`SECURITY.md`](SECURITY.md) before exposing anything.
 
 ## 🛠️ Development
 
+Agent-land rules (docs style, checks, hooks): [`AGENTS.md`](AGENTS.md).
+
 ```bash
+scripts/install-hooks.sh                  # once per clone: commit-msg + pre-commit + pre-push gates
 # frontend
 cd frontend && npm ci && npm run dev      # vite dev
 npm run build                              # tsc + vite -> dist/ (served by server.py)

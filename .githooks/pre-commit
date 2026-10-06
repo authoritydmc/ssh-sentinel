@@ -1,0 +1,9 @@
+#!/bin/sh
+# Fast checks before each commit: backend compile + frontend lint.
+set -e
+python3 -m compileall -q backend/server.py agent/agent.py demo/gen_auth_log.py
+if command -v npm >/dev/null 2>&1 && [ -d frontend/node_modules ]; then
+  (cd frontend && npm run lint --silent)
+else
+  echo "pre-commit: skip frontend lint (no node_modules; run npm ci once)"
+fi

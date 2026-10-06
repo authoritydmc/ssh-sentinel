@@ -9,6 +9,7 @@ services:
     ports:
       - "${PORT:-8079}:8079"
     environment:
+      ROLE: ${ROLE:-central}
       HOST_ID: ${HOST_ID:-central}
       SELF_PUBLIC_IPS: ${SELF_PUBLIC_IPS:-}
       AUTH_LOG: ${AUTH_LOG:-/var/log/auth.log}
@@ -60,5 +61,29 @@ services:
     volumes:
       - ./demo/auth.log.sample:/srv/demo/auth.log.sample:ro
 
+  # Agent mode: same image, ships this host's log to central. Needs a join
+  # token first (on central: server.py gentoken <host>), then:
+  #   ROLE=agent AGENT_ID=web-01 CENTRAL_URL=https://<central-tailnet>:8079 \
+  #   AGENT_TOKEN=<token> docker compose --profile agent up -d --build
+  agent:
+    profiles: ["agent"]
+    build: .
+    image: rajlabs/ssh-sentinel:latest
+    container_name: ssh-sentinel-agent
+    restart: unless-stopped
+    environment:
+      ROLE: agent
+      AGENT_ID: ${AGENT_ID:-}
+      CENTRAL_URL: ${CENTRAL_URL:-http://central:8079}
+      AGENT_TOKEN: ${AGENT_TOKEN:-}
+      PUSH_EVERY: ${PUSH_EVERY:-10}
+      SHIP_FILTER: ${SHIP_FILTER:-sshd-only}
+      AUTH_LOG: ${AUTH_LOG:-/var/log/auth.log}
+      AGENT_STATE: /var/lib/ssh-sentinel-agent/state.json
+    volumes:
+      - /var/log/auth.log:/var/log/auth.log:ro
+      - sentinel_agent_state:/var/lib/ssh-sentinel-agent
+
 volumes:
   sentinel_data:
+  sentinel_agent_state:

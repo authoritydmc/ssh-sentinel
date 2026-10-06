@@ -1,5 +1,5 @@
 import {
-  Activity, AlertTriangle, CheckCircle2, ChevronLeft, Crosshair, Eye, Globe2,
+  Activity, AlertTriangle, CheckCircle2, ChevronLeft, Crosshair, Eye, GitBranch, Globe2,
   LayoutDashboard, ListOrdered, Map as MapIcon, Pause, Play, Radio, Search,
   Server, ShieldAlert, ShieldCheck, Users,
 } from 'lucide-react';
@@ -12,7 +12,7 @@ const WorldMap = lazy(() => import('./components/charts').then(m => ({ default: 
 import { Badge, Card, Empty, MetricCard, Skeleton } from './components/ui';
 const AttackerModal = lazy(() => import('./components/AttackerModal'));
 import { eventTone, } from './components/ui';
-import { TZ, fetchAuth, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type Summary } from './lib/api';
+import { REPO_URL, TZ, fetchAuth, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type Summary } from './lib/api';
 import { clsx } from 'clsx';
 
 type View = 'overview' | 'attackers' | 'events';
@@ -107,8 +107,14 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="hidden border-t border-[#1e2a3f] p-3 md:block">
-          <button onClick={() => setCollapsed(!collapsed)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-[#8b98ad] hover:text-white">
+        <div className="space-y-1 border-t border-[#1e2a3f] p-3">
+          <a href={REPO_URL} target="_blank" rel="noreferrer" title={`ssh-sentinel on GitHub${auth?.version ? ` · v${auth.version}` : ''}`}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#8b98ad] transition-all hover:bg-white/5 hover:text-white">
+            <GitBranch size={17} className="shrink-0" />
+            {!collapsed && <span className="font-medium">GitHub</span>}
+            {!collapsed && auth?.version && <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] ring-1 ring-inset ring-white/10">v{auth.version}</span>}
+          </a>
+          <button onClick={() => setCollapsed(!collapsed)} className="hidden w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-[#8b98ad] hover:text-white md:flex">
             <ChevronLeft size={15} className={clsx('transition-transform', collapsed && 'rotate-180')} />{!collapsed && 'Collapse'}
           </button>
         </div>
@@ -230,6 +236,9 @@ export default function App() {
           <span>geo cache: <b className="text-white">{data?.geo_cached ?? '…'}</b></span>
           <span>self excluded: <b className="text-white">{data?.excluded_self ?? '…'}</b></span>
           <span className="hidden sm:inline">auto-refresh 60s</span>
+          <a href={REPO_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white">
+            <GitBranch size={12} /> ssh-sentinel{auth?.version ? ` v${auth.version}` : ''}
+          </a>
           <span className="ml-auto">times in {TZ}</span>
         </footer>
       </div>

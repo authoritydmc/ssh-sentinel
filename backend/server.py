@@ -144,7 +144,8 @@ def auth_status(user=None):
     return {"mode": AUTH_MODE,
             "login": "none" if AUTH_MODE == "none" else ("forward" if AUTH_MODE == "forward" else "basic"),
             "user": user or None,
-            "safe": AUTH_MODE in ("local", "forward")}
+            "safe": AUTH_MODE in ("local", "forward"),
+            "version": os.environ.get("APP_VERSION", "dev")}
 
 
 def mask_user(u):

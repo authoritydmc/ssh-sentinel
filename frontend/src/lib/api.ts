@@ -38,7 +38,8 @@ async function get<T>(p: string): Promise<T> {
 
 export interface Host { id: string; local: boolean; last_seen: number; online: boolean; lines?: number }
 export const fetchHosts = () => get<Host[]>('hosts');
-export interface AuthInfo { mode: string; login: string; user: string | null; safe: boolean }
+export interface AuthInfo { mode: string; login: string; user: string | null; safe: boolean; version?: string }
+export const REPO_URL = 'https://github.com/authoritydmc/ssh-sentinel';
 export const fetchAuth = () => get<AuthInfo>('auth');
 const withHost = (p: string, host: string) => (host && host !== 'all' ? `${p}${p.includes('?') ? '&' : '?'}host=${encodeURIComponent(host)}` : p);
 export const fetchSummary = (host = 'all') => get<Summary>(withHost('summary', host));

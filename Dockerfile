@@ -15,6 +15,10 @@ LABEL org.opencontainers.image.title="ssh-sentinel" \
 ENV APP_VERSION=${APP_VERSION} GIT_COMMIT=${GIT_COMMIT}
 WORKDIR /srv
 COPY backend/server.py ./server.py
+COPY agent/agent.py ./agent.py
+COPY docker/entrypoint.sh ./entrypoint.sh
 COPY --from=web /build/dist ./dist
+RUN chmod +x /srv/entrypoint.sh
 EXPOSE 8079
-CMD ["python3", "/srv/server.py"]
+# ROLE=central (API + UI) | agent (log shipper). See docker-compose.yml.
+ENTRYPOINT ["/srv/entrypoint.sh"]

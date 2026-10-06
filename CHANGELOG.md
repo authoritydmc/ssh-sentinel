@@ -14,6 +14,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - SSO hardening + one-shot connect: `AUTH_TRUSTED_PROXIES` (spoof-safe header trust; loopback + RFC1918 + Tailscale default), Authelia `Remote-User` + Cloudflare Access email headers, `examples/sso-traefik-authentik.yml` overlay + provider table.
 - Pluggable recon: `RECON_PROVIDER=spiderfoot|webhook|none` (`RECON_WEBHOOK_URL/TOKEN`, 7d cache) for any probing service.
 - Release automation: `scripts/release.sh` (VERSION + CHANGELOG + tag + push), semver Docker tags to Hub + GHCR, GitHub Releases from CHANGELOG, issue/PR templates, Dependabot.
+- Role-switchable image: `ROLE=central|agent` via `docker/entrypoint.sh` + `compose --profile agent` (container shipper alternative to systemd).
+- UI: GitHub repo link with version badge (sidebar + footer, from `/api/auth`), crisp opaque metric values (blur fix).
+- `docs/ARCHITECTURE.md` (mermaid + procedures), `AGENTS.md` repo rules, `.githooks/` (commit-msg, pre-commit, pre-push) + `scripts/install-hooks.sh`.
 - Public-release hardening: MIT LICENSE, SECURITY.md, expanded `.gitignore` / `.dockerignore`.
 - GitHub Actions: Docker publish to GHCR + Docker Hub, frontend CI (lint/build).
 - `SPIDERFOOT_URL` / `RECON_MODULES` env overrides (was hardcoded SpiderFoot host).

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Enforce conventional commits: feat|fix|chore|docs|...(scope): text
+MSG_FILE="$1"
+MSG=$(head -n1 "$MSG_FILE")
+if ! printf '%s' "$MSG" | grep -Eq '^(feat|fix|chore|docs|refactor|test|ci)(\(.+\))?: .{3,}'; then
+  echo "commit-msg rejected: use 'feat|fix|chore|docs|...(scope): text'" >&2
+  echo "got: $MSG" >&2
+  exit 1
+fi

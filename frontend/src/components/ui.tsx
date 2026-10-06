@@ -16,11 +16,12 @@ export const Card = ({ title, icon, action, children, className }: {
 export const MetricCard = ({ icon, label, value, sub, tone }: {
   icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode; tone?: 'bad' | 'ok' | 'acc' | 'warn';
 }) => {
+  // Opaque gradient stops only: fading to transparent made glyphs look blurry.
   const tones: Record<string, string> = {
-    bad: 'from-[#f85149]/25 to-transparent text-[#ff9d97]',
-    ok: 'from-[#3fb950]/25 to-transparent text-[#7ee787]',
-    warn: 'from-[#d29922]/25 to-transparent text-[#e8b93e]',
-    acc: 'from-[#58a6ff]/25 to-transparent text-[#a5d6ff]',
+    bad: 'from-[#ffb4b4] to-[#f85149]',
+    ok: 'from-[#a9f0b4] to-[#3fb950]',
+    warn: 'from-[#f5d47a] to-[#d29922]',
+    acc: 'from-[#b9d9ff] to-[#58a6ff]',
   };
   return (
     <div className="glass group rounded-2xl p-4 shadow-lg shadow-black/20 transition-all hover:-translate-y-0.5 hover:border-[#58a6ff]/50">
