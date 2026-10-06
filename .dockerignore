@@ -22,4 +22,5 @@ dist
 .idea
 *.md
 !README.md
+!CHANGELOG.md
 demo/
