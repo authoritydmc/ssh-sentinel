@@ -31,14 +31,15 @@ Read this file before you change code. Obey all rules in it.
 ## 4. Required checks (in this order)
 
 1. `python3 -m compileall -q backend/server.py agent/agent.py demo/gen_auth_log.py`
-2. `cd frontend && npm run lint && npm run build`
-3. For backend behavior changes: run the server with the demo log and test
-   each mode you touched (`none`, `local`, `forward`) plus `/api/abusers`.
-4. Commit with a conventional message: `feat|fix|chore|docs(scope): text`.
-5. Open a PR to `master` and write the description with
+2. `python3 scripts/selftest_oidc.py`
+3. `cd frontend && npm run lint && npm run build`
+4. For backend behavior changes: run the server with the demo log and test
+   each mode you touched (`none`, `local`, `forward`, `oidc`) plus `/api/abusers`.
+5. Commit with a conventional message: `feat|fix|chore|docs(scope): text`.
+6. Open a PR to `master` and write the description with
    `skills/pr-writing/SKILL.md`.
    Confirm `ci` + `Docker Image CI-PROD master` are green.
-6. Confirm the new Hub/GHCR tags exist before you claim success.
+7. Confirm the new Hub/GHCR tags exist before you claim success.
 
 ## 5. Git hooks
 
