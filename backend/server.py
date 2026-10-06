@@ -70,7 +70,8 @@ AUTH_PASS_HASH = os.environ.get("AUTH_PASS_HASH", "").strip()
 _AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 AUTH_ALLOWED_USERS = {p.strip() for p in os.environ.get("AUTH_ALLOWED_USERS", "").split(",") if p.strip()}
 FWD_USER_HEADERS = ("X-Forwarded-User", "X-Forwarded-Email", "Remote-User",
-                    "Cf-Access-Authenticated-User-Email", "X-Auth-Request-User")
+                    "Cf-Access-Authenticated-User-Email", "X-Auth-Request-User",
+                    "X-authentik-username", "X-authentik-email")
 # Networks allowed to present SSO identity headers (spoof-safe ForwardAuth).
 # Defaults cover loopback + RFC1918 (docker/traefik) + Tailscale CGNAT.
 _TRUSTED_PROXIES_RAW = os.environ.get(
