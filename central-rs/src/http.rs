@@ -1,4 +1,4 @@
-//! HTTP server and routing. Mirrors backend/server.py paths and payloads.
+//! HTTP server and routing. Mirrors central-rs paths and payloads.
 
 use crate::auth;
 use crate::config::{Cfg, Eff};

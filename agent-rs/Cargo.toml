@@ -2,7 +2,7 @@
 name = "ssh-sentinel-agent"
 version = "0.1.0"
 edition = "2021"
-description = "SSH Sentinel log shipper in Rust. Same protocol as agent/agent.py."
+description = "SSH Sentinel log shipper in Rust. Same protocol as agent-rs."
 license = "MIT"
 
 [[bin]]

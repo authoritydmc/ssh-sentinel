@@ -6,12 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Rust runtime for central plus agent. Python is gone from the image.
+  `central-rs` serves the API plus UI. `agent-rs` ships logs.
+  Same API, same DB schema, same CLI (`gentoken`, `genhash`, `scrub`).
+- Static agent binary in GitHub Releases. `agent/install.sh` fetches it.
+  No build tools needed on member servers.
+- CI covers the swap: `cargo test`, agent parity, central smoke,
+  musl static build, standalone agent image build.
+- `PORT` env selects the listen port (default 8079).
 - Full sign-in panel: mode-aware help plus always-visible SSO button in `oidc` mode.
 - Rust agent pilot (`agent-rs/`): same push protocol as Python, static musl image, parity-tested in CI.
 - Rust central (`central-rs/`): full endpoint parity with Python, unit-tested (RFC 7515 vector included).
 - CI parity job: boots Python plus Rust centrals on the demo log and diffs all deterministic fields.
 - CI footprint job: reports central image size plus RSS plus CPU on every run. See `docs/RUST_MIGRATION.md`.
-- `PORT` env selects the listen port (default 8079). Both centrals honor it.
 - Admin can edit bans and reports from UI. New `GET plus POST /api/admin/config` stores overrides in SQLite. Env var set locks a field. No restart is needed.
 - Admin can edit whitelist, trusted IPs and users, self IPs, abusers bar, and public feed from UI. Same env-lock rule applies.
 - Fail2ban guide `docs/FAIL2BAN.md` with same-host push plus banlist pull plus verify steps. Linked from Admin, README, and `.env.example`.

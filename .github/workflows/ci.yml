@@ -27,26 +27,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: python3 -m compileall -q backend/server.py agent/agent.py demo/gen_auth_log.py
-      - run: python3 demo/gen_auth_log.py && test -s demo/auth.log.sample
-      - run: python3 scripts/selftest_oidc.py
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path central-rs/Cargo.toml
+      - run: cargo test --manifest-path agent-rs/Cargo.toml
+      - run: test -s demo/auth.log.sample
 
   rust-agent:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: cargo build --release --manifest-path agent-rs/Cargo.toml
       - run: ls -l agent-rs/target/release/ssh-sentinel-agent
+      - run: cargo build --release --target x86_64-unknown-linux-musl --manifest-path agent-rs/Cargo.toml
+      - run: ls -l agent-rs/target/x86_64-unknown-linux-musl/release/ssh-sentinel-agent
+      - run: cargo build --manifest-path central-rs/Cargo.toml
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: chmod +x scripts/parity-agent.sh && AGENT_BIN=agent-rs/target/release/ssh-sentinel-agent bash scripts/parity-agent.sh
+      - run: chmod +x scripts/parity-agent.sh && AGENT_BIN=agent-rs/target/release/ssh-sentinel-agent CENTRAL_BIN=central-rs/target/debug/ssh-sentinel bash scripts/parity-agent.sh
 
-  parity-central:
+  smoke-central:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -55,4 +59,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: cargo build --manifest-path central-rs/Cargo.toml
-      - run: chmod +x scripts/parity-central.sh && RSBIN=central-rs/target/debug/ssh-sentinel bash scripts/parity-central.sh
+      - run: chmod +x scripts/smoke-central.sh && RSBIN=central-rs/target/debug/ssh-sentinel bash scripts/smoke-central.sh

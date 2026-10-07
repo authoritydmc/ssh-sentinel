@@ -8,7 +8,7 @@ over your tailnet, central aggregates. No database, no dependencies at runtime.
 ![GHCR](https://img.shields.io/badge/ghcr-ssh--sentinel-blue?logo=github)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Stack](https://img.shields.io/badge/frontend-React19%20%2B%20Tailwind4-58a6ff)
-![Backend](https://img.shields.io/badge/backend-python%20stdlib-3fb950)
+![Backend](https://img.shields.io/badge/backend-Rust-f74c00)
 
 ```
 agent (any server) --tailscale+bearer--> central (main server) --> UI
@@ -59,7 +59,7 @@ Full design (diagrams + procedures, simplified English): [`docs/ARCHITECTURE.md`
 ```
 ┌────────────┐  tail + push (10s)   ┌─────────────────────┐
 │  member-01 │ ── Bearer:TOKEN ───▶ │      central        │
-│ /var/log/  │  outbound only       │  server.py (stdlib) │
+│ /var/log/  │  outbound only       │  ssh-sentinel (Rust) │
 │ auth.log   │                      │  + React dist       │
 └────────────┘                      │  data/hosts/*.jsonl │
 ┌────────────┐                      │  data/agents.json   │
@@ -70,8 +70,8 @@ Full design (diagrams + procedures, simplified English): [`docs/ARCHITECTURE.md`
                                     React 19 SOC dashboard
 ```
 
-- **Backend** (`backend/server.py`): stdlib `ThreadingHTTPServer`, serves `dist/` + JSON API, parses syslog + ISO timestamps, enriches via ip-api/RDAP/rDNS (cached), optional SpiderFoot recon.
-- **Agent** (`agent/agent.py`): stdlib tailer, inode+offset resume across rotation/restarts, exponential backoff, `PUSH_EVERY=10` default.
+- **Backend** (`central-rs/`): Rust `ssh-sentinel` binary, serves `dist/` + JSON API, parses syslog + ISO timestamps, enriches via ip-api/RDAP/rDNS (cached), optional SpiderFoot recon.
+- **Agent** (`agent-rs/`): static Rust tailer, inode+offset resume across rotation/restarts, exponential backoff, `PUSH_EVERY=10` default.
 - **Frontend** (`frontend/`): Vite + React 19 + Tailwind v4, code-split charts/map/modal, 60s auto-refresh, base path `/ssh/`.
 
 ## 🚀 Quickstart
@@ -112,7 +112,7 @@ docker compose up -d --build
 Mint a local-login hash (never commit the password or hash):
 
 ```bash
-docker exec -it ssh-sentinel python3 /srv/server.py genhash
+docker exec -it ssh-sentinel /srv/ssh-sentinel genhash
 # -> AUTH_PASS_HASH=pbkdf2-sha256$200000$...   (paste into .env, compose up -d)
 ```
 
@@ -196,7 +196,7 @@ docker compose --profile demo up --build
 Regenerate the sample data:
 
 ```bash
-python3 demo/gen_auth_log.py  # writes demo/auth.log.sample (seeded, deterministic)
+demo/auth.log.sample is committed and frozen (was seeded, deterministic)
 ```
 
 ## 🌐 Fleet: central + join N servers (Tailscale recommended)
@@ -204,7 +204,7 @@ python3 demo/gen_auth_log.py  # writes demo/auth.log.sample (seeded, determinist
 **On central:** run the `central` service as above, then mint a join token:
 
 ```bash
-docker exec ssh-sentinel python3 /srv/server.py gentoken web-01
+docker exec ssh-sentinel /srv/ssh-sentinel gentoken web-01
 # -> host=web-01, token=..., central=http://<this-host>:8079
 ```
 
@@ -225,7 +225,7 @@ CENTRAL_URL=http://central:8079 AGENT_TOKEN=<token> AGENT_ID=web-01 sudo -E ./ag
 Verify on central:
 
 ```bash
-curl -s localhost:8079/api/hosts | python3 -m json.tool
+curl -s localhost:8079/api/hosts | jq
 curl -s 'localhost:8079/api/summary?host=web-01' | head -c 500
 ```
 
@@ -304,7 +304,7 @@ curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 | `RECON_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_ipapico,sfp_abusech` | central | SpiderFoot module list |
 | `AUTH_MODE` | `local` | central | `local` (Basic login, fail-closed) \| `forward` (Authentik+Traefik ForwardAuth via SSO headers) \| `oidc` (built-in SSO code flow) \| `none` (open — private tailnet/demo only) |
 | `AUTH_USER` | `admin` | central | Local-login username |
-| `AUTH_PASS_HASH` | `` | central | `pbkdf2-sha256$…` from `docker exec ssh-sentinel python3 /srv/server.py genhash` (preferred over `AUTH_PASSWORD`) |
+| `AUTH_PASS_HASH` | `` | central | `pbkdf2-sha256$…` from `docker exec ssh-sentinel /srv/ssh-sentinel genhash` (preferred over `AUTH_PASSWORD`) |
 | `AUTH_PASSWORD` | `` | central | Plaintext fallback (never logged); prefer the hash |
 | `AUTH_ALLOWED_USERS` | `` | central | Optional allowlist for forward mode, e.g. `alice,bob@example.com` |
 | `AUTH_TRUSTED_PROXIES` | loopback + RFC1918 + Tailscale CGNAT | central | CIDRs allowed to present SSO identity headers (spoof-safe ForwardAuth) |
@@ -330,11 +330,11 @@ Files:
 | Path | What |
 | ---- | ---- |
 | `frontend/` | Vite + React 19 + Tailwind v4 SOC dashboard (code-split) |
-| `backend/server.py` | stdlib API + static dist serving + agent push + host store |
-| `agent/agent.py` | stdlib trailing shipper (systemd via `install.sh`) |
+| `central-rs/` | Rust API + static dist serving + agent push + host store |
+| `agent-rs/` | static Rust shipper (systemd via `install.sh`, or `agent-rs/Dockerfile`) |
 | `agent-rs/` | Rust shipper pilot, same protocol, static image (see `agent-rs/README.md`) |
 | `demo/` | sample log + generator for UI work without real attacks |
-| `Dockerfile` | node:20 build → python:3.12-alpine runtime |
+| `Dockerfile` | node build + cargo build → debian-slim runtime (no Python) |
 | `.github/workflows/` | `docker.yml` (GHCR + Docker Hub publish), `ci.yml` (frontend lint/build + python compile) |
 
 ## 🔒 Security
@@ -360,15 +360,15 @@ Agent-land rules (docs style, checks, hooks): [`AGENTS.md`](AGENTS.md).
 scripts/install-hooks.sh                  # once per clone: commit-msg + pre-commit + pre-push gates
 # frontend
 cd frontend && npm ci && npm run dev      # vite dev
-npm run build                              # tsc + vite -> dist/ (served by server.py)
+npm run build                              # tsc + vite -> dist/ (served by ssh-sentinel)
 npm run lint                               # oxlint
 
 # backend (no deps)
-python3 backend/server.py                  # serves :8079, reads $AUTH_LOG
-AUTH_LOG=demo/auth.log.sample python3 backend/server.py
+cargo run --manifest-path central-rs/Cargo.toml  # serves :8079
+AUTH_LOG=demo/auth.log.sample cargo run --manifest-path central-rs/Cargo.toml
 
 # agent
-CENTRAL_URL=http://localhost:8079 AGENT_TOKEN=dummy python3 agent/agent.py
+CENTRAL_URL=http://localhost:8079 AGENT_TOKEN=dummy cargo run --manifest-path agent-rs/Cargo.toml
 
 # full stack
 docker compose up --build

@@ -1,6 +1,6 @@
 # SSH Sentinel agent in Rust (pilot)
 
-Small static binary with the same push protocol as `agent/agent.py`.
+Small static binary with the same push protocol as `agent-rs`.
 Use it where the Python agent feels heavy. Central stays Python.
 
 ## Build

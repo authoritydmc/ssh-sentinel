@@ -1,4 +1,4 @@
-//! SQLite store. Same schema as backend/server.py. Logs stay source of truth.
+//! SQLite store. Same schema as central-rs. Logs stay source of truth.
 
 use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;

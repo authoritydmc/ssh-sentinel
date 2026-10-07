@@ -1,14 +1,29 @@
 #!/usr/bin/env bash
 # Join a server to the SSH Sentinel fleet (run ON THE JOINING SERVER as root).
 # Usage: CENTRAL_URL=http://central:8079 AGENT_TOKEN=<from central gentoken> sudo -E ./install.sh
+# Fetches the static Rust agent binary from GitHub Releases. No build tools needed.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 : "${CENTRAL_URL:?set CENTRAL_URL, e.g. http://central-tailscale-name:8079 (tailscale name)}"
-: "${AGENT_TOKEN:?set AGENT_TOKEN from central: python3 backend/server.py gentoken <host-id>}"
+: "${AGENT_TOKEN:?set AGENT_TOKEN from central: ssh-sentinel gentoken <host-id>}"
 AGENT_ID="${AGENT_ID:-$(hostname -s)}"
-SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO="${REPO:-authoritydmc/ssh-sentinel}"
+VERSION="${AGENT_VERSION:-$(cat "$(dirname "$0")/../VERSION" 2>/dev/null || echo 0.6.0)}"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64) TARGET="x86_64-unknown-linux-musl" ;;
+  aarch64) TARGET="aarch64-unknown-linux-musl" ;;
+  *) echo "unsupported arch: $ARCH (want x86_64 or aarch64)"; exit 1 ;;
+esac
 
-install -m 0755 "$SRC_DIR/agent.py" /usr/local/bin/ssh-sentinel-agent
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+URL="https://github.com/${REPO}/releases/download/v${VERSION}/ssh-sentinel-agent-${TARGET}"
+echo "fetching $URL"
+curl -fsSL "$URL" -o "$TMP/ssh-sentinel-agent"
+chmod 0755 "$TMP/ssh-sentinel-agent"
+"$TMP/ssh-sentinel-agent" --help >/dev/null 2>&1 || true
+install -m 0755 "$TMP/ssh-sentinel-agent" /usr/local/bin/ssh-sentinel-agent
 mkdir -p /var/lib/ssh-sentinel-agent /etc/ssh-sentinel-agent
 cat > /etc/ssh-sentinel-agent/env <<EOF
 CENTRAL_URL=$CENTRAL_URL
@@ -26,7 +41,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/ssh-sentinel-agent/env
-ExecStart=/usr/bin/python3 /usr/local/bin/ssh-sentinel-agent
+ExecStart=/usr/local/bin/ssh-sentinel-agent
 Restart=always
 RestartSec=10
 NoNewPrivileges=true

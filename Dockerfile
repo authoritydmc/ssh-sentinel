@@ -1,4 +1,4 @@
-# SSH Sentinel: React SOC dashboard (built) + stdlib Python API (runtime).
+# SSH Sentinel: React SOC dashboard (built) + Rust central + Rust agent.
 FROM node:26-alpine AS web
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
@@ -6,22 +6,41 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-FROM python:3.12-alpine
+FROM rust:1-bookworm AS rust
+WORKDIR /build
+COPY central-rs/Cargo.toml central-rs/Cargo.lock central-rs/
+COPY agent-rs/Cargo.toml agent-rs/Cargo.lock agent-rs/
+RUN mkdir -p central-rs/src agent-rs/src \
+  && echo 'fn main() {}' > central-rs/src/main.rs \
+  && echo 'fn main() {}' > agent-rs/src/main.rs \
+  && cargo build --release --manifest-path central-rs/Cargo.toml \
+  && cargo build --release --manifest-path agent-rs/Cargo.toml
+COPY central-rs/ central-rs/
+COPY agent-rs/ agent-rs/
+# COPY keeps old mtimes, so cargo would call the dummy build fresh.
+# Touch sources first to force a real rebuild.
+RUN find central-rs/src agent-rs/src -exec touch {} + \
+  && cargo build --release --manifest-path central-rs/Cargo.toml \
+  && cargo build --release --manifest-path agent-rs/Cargo.toml \
+  && ls -l central-rs/target/release/ssh-sentinel agent-rs/target/release/ssh-sentinel-agent
+
+FROM debian:bookworm-slim
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
 LABEL org.opencontainers.image.title="ssh-sentinel" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}"
-ENV APP_VERSION=${APP_VERSION} GIT_COMMIT=${GIT_COMMIT} \
-    PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENV APP_VERSION=${APP_VERSION} GIT_COMMIT=${GIT_COMMIT}
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /srv
-COPY backend/server.py ./server.py
-COPY agent/agent.py ./agent.py
+COPY --from=rust /build/central-rs/target/release/ssh-sentinel ./ssh-sentinel
+COPY --from=rust /build/agent-rs/target/release/ssh-sentinel-agent ./ssh-sentinel-agent
 COPY docker/entrypoint.sh ./entrypoint.sh
 COPY VERSION ./VERSION
 COPY CHANGELOG.md ./CHANGELOG.md
 COPY --from=web /build/dist ./dist
-RUN chmod +x /srv/entrypoint.sh
+RUN chmod +x /srv/entrypoint.sh /srv/ssh-sentinel /srv/ssh-sentinel-agent
 EXPOSE 8079
 # ROLE=central (API + UI) | agent (log shipper). See docker-compose.yml.
 ENTRYPOINT ["/srv/entrypoint.sh"]

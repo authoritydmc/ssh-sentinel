@@ -24,11 +24,11 @@ SSH Sentinel is designed to run on a **private tailnet or localhost**:
 
 - Agents push **outbound only** (no inbound ports on members).
 - Bearer per-host tokens are stored in `data/agents.json` (`0600`).
-  Rotate with `docker exec ssh-sentinel python3 /srv/server.py gentoken <host>`.
+  Rotate with `docker exec ssh-sentinel /srv/ssh-sentinel gentoken <host>`.
 - **Never expose port 8079 directly to the internet.** Put SSO in front
   (Tailscale Serve, Cloudflare Access, Authelia, Traefik + Authentik).
 - **Login modes** (`AUTH_MODE`, default `local` fail-closed): `local` = HTTP Basic
-  against `AUTH_USER` + `AUTH_PASS_HASH` (mint with `server.py genhash`) or
+  against `AUTH_USER` + `AUTH_PASS_HASH` (mint with `ssh-sentinel genhash`) or
   `AUTH_PASSWORD`;   `forward` = trust SSO identity headers from
   Authentik-via-Traefik ForwardAuth (Authentik `X-authentik-username` / `X-authentik-email`, also Authelia `Remote-User`, Cloudflare
   Access email) **only from `AUTH_TRUSTED_PROXIES`** (default loopback +
@@ -88,4 +88,4 @@ Defaults are chosen so compromise detection never goes blind:
   for strongest signal. Without them, only `fail-then-accept` flags.
 - Stored agent logs are `0600` plaintext JSONL capped at `MAX_LINES_PER_HOST`.
   After enabling filtering, purge old noise:
-  `docker exec ssh-sentinel python3 /srv/server.py scrub`.
+  `docker exec ssh-sentinel /srv/ssh-sentinel scrub`.
