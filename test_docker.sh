@@ -113,7 +113,7 @@ chk() {
 chk '.total >= 1 and (.abusers | length > 0)' "empty abusers feed"
 chk '[.abusers[] | tojson] | join("") | contains("Accepted") | not' "accepted leak"
 chk '[.abusers[].ip] | index("175.6.158.150") | not' "whitelisted IP listed"
-chk '[.abusers[] | select(.hits >= 5 and .risk >= 25 and (.band == "low" or .band == "medium" or .band == "high" or .band == "critical"))] | length == (.abusers | length)' "quality bar"
+chk '(.abusers | length) as $n | [.abusers[] | select(.hits >= 5 and .risk >= 25 and (.band == "low" or .band == "medium" or .band == "high" or .band == "critical"))] | length == $n' "quality bar"
 echo "[ OK ] /api/abusers open, whitelisted IP absent, scored"
 curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/abusers" | grep -q 'public abusers'
 echo "[ OK ] /abusers leaderboard page open"
