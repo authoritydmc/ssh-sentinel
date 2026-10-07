@@ -332,6 +332,7 @@ Files:
 | `frontend/` | Vite + React 19 + Tailwind v4 SOC dashboard (code-split) |
 | `backend/server.py` | stdlib API + static dist serving + agent push + host store |
 | `agent/agent.py` | stdlib trailing shipper (systemd via `install.sh`) |
+| `agent-rs/` | Rust shipper pilot, same protocol, static image (see `agent-rs/README.md`) |
 | `demo/` | sample log + generator for UI work without real attacks |
 | `Dockerfile` | node:20 build → python:3.12-alpine runtime |
 | `.github/workflows/` | `docker.yml` (GHCR + Docker Hub publish), `ci.yml` (frontend lint/build + python compile) |
@@ -373,6 +374,10 @@ CENTRAL_URL=http://localhost:8079 AGENT_TOKEN=dummy python3 agent/agent.py
 docker compose up --build
 docker compose --profile demo up --build
 ```
+
+When the API answers 401, the UI shows a sign-in panel. It explains the active mode. In `oidc` mode it shows a **Sign in with SSO** button.
+
+Footprint is tracked in CI (image size plus RSS plus CPU per run). Rust plans live in [`docs/RUST_MIGRATION.md`](docs/RUST_MIGRATION.md).
 
 Images publish on every `master` push + tags via GitHub Actions:
 

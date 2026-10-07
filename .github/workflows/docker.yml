@@ -25,6 +25,16 @@ jobs:
           chmod +x test_docker.sh
           ./test_docker.sh
 
+  footprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Report image size plus RSS and CPU
+        run: |
+          chmod +x scripts/footprint.sh
+          bash scripts/footprint.sh
+
   build:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'

@@ -6,6 +6,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Full sign-in panel: mode-aware help plus always-visible SSO button in `oidc` mode.
+- Rust agent pilot (`agent-rs/`): same push protocol as Python, static musl image, parity-tested in CI.
+- CI footprint job: reports central image size plus RSS plus CPU on every run. See `docs/RUST_MIGRATION.md`.
 - Admin can edit bans and reports from UI. New `GET plus POST /api/admin/config` stores overrides in SQLite. Env var set locks a field. No restart is needed.
 - Admin can edit whitelist, trusted IPs and users, self IPs, abusers bar, and public feed from UI. Same env-lock rule applies.
 - Fail2ban guide `docs/FAIL2BAN.md` with same-host push plus banlist pull plus verify steps. Linked from Admin, README, and `.env.example`.
