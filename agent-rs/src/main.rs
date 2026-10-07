@@ -5,8 +5,26 @@
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::MetadataExt;
 use std::time::Duration;
+
+/// Stable file identity across rotation. Inode on Unix, file index on Windows.
+fn file_id(meta: &fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.ino()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        meta.file_index().unwrap_or(0)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = meta;
+        0
+    }
+}
 
 fn env(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
@@ -55,7 +73,7 @@ fn read_new(log: &str, state: (Option<u64>, u64)) -> (Vec<String>, (Option<u64>,
             return (vec![], state);
         }
     };
-    let ino = meta.ino();
+    let ino = file_id(&meta);
     let len = meta.len();
     let mut off = if state.0 == Some(ino) { state.1 } else { 0 };
     if off > len {
