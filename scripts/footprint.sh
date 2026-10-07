@@ -7,15 +7,7 @@ cd "$(dirname "$0")/.."
 IMG="ssh-sentinel:footprint"
 CONTAINER="ssh-sentinel-footprint-$$"
 
-pick_port() {
-  python3 - <<'PY' 2>/dev/null || true
-import socket
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-}
+HOST_PORT="${FOOTPRINT_PORT:-18090}"
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -28,8 +20,6 @@ SIZE=$(docker images "$IMG" --format "{{.Size}}")
 echo "image size: $SIZE"
 
 echo "[2/3] Booting with demo log..."
-HOST_PORT=$(pick_port)
-[ -z "${HOST_PORT:-}" ] && HOST_PORT=18090
 docker run -d --name "$CONTAINER" -p "$HOST_PORT:8079" \
   -e HOST_ID=footprint -e AUTH_LOG=/srv/demo/auth.log.sample -e AUTH_MODE=none \
   -v "$PWD/demo/auth.log.sample:/srv/demo/auth.log.sample:ro" \

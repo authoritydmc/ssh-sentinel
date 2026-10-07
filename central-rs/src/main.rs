@@ -51,6 +51,9 @@ fn main() {
         println!("ssh-sentinel {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    if args.iter().any(|a| a == "--healthcheck") {
+        std::process::exit(healthcheck(&args));
+    }
     let data_dir = util::env("DATA_DIR", "./data");
     if args.len() >= 3 && args[1] == "gentoken" {
         let host: String = args[2].chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).take(64).collect();
@@ -134,6 +137,31 @@ fn scrub(data_dir: &str) {
         kept_n, dropped_n,
         if cfg.privacy_off { "off" } else { "balanced" },
         if cfg.ship_full { "full" } else { "sshd-only" });
+}
+
+fn healthcheck(args: &[String]) -> i32 {
+    // Usage: ssh-sentinel --healthcheck [--port N]. Exit 0 when /healthz is ok.
+    let mut port = util::env("PORT", "8079");
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--port" {
+            if let Some(v) = args.get(i + 1) {
+                port = v.clone();
+            }
+        }
+        i += 1;
+    }
+    let url = format!("http://127.0.0.1:{}/healthz", port.trim());
+    match ureq::get(&url).timeout(std::time::Duration::from_secs(5)).call() {
+        Ok(r) => {
+            if r.into_string().unwrap_or_default().trim() == "ok" {
+                0
+            } else {
+                1
+            }
+        }
+        Err(_) => 1,
+    }
 }
 
 fn serve() {

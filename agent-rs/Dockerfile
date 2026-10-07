@@ -3,14 +3,16 @@
 FROM rust:1-alpine AS build
 RUN apk add --no-cache musl-dev gcc cmake perl
 WORKDIR /build
-COPY agent-rs/Cargo.toml ./
-RUN mkdir -p src && echo 'fn main() {}' > src/main.rs \
-  && cargo build --release || true
-COPY agent-rs/ ./
+COPY Cargo.toml Cargo.lock ./
+COPY agent-rs/Cargo.toml agent-rs/
+RUN mkdir -p agent-rs/src \
+  && echo 'fn main() {}' > agent-rs/src/main.rs \
+  && cargo build --release -p ssh-sentinel-agent || true
+COPY agent-rs/ agent-rs/
 # COPY keeps old mtimes, so cargo would call the dummy build fresh.
 # Touch sources first to force a real rebuild.
-RUN find src -exec touch {} + \
-  && cargo build --release \
+RUN find agent-rs/src -exec touch {} + \
+  && cargo build --release -p ssh-sentinel-agent \
   && cp "$(find target -name ssh-sentinel-agent -type f | head -1)" /agent-bin \
   && ls -l /agent-bin
 

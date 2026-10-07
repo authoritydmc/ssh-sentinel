@@ -36,7 +36,7 @@ pub fn own_ips(extra: &HashSet<String>) -> HashSet<String> {
             }
         }
     }
-    // Default-route source address (same trick as Python).
+    // Default-route source address via UDP connect trick.
     if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0") {
         if s.connect("8.8.8.8:80").is_ok() {
             if let Ok(a) = s.local_addr() {
@@ -94,7 +94,7 @@ fn user_ip_strict(rest: &str) -> Option<(String, String)> {
 
 /// (user, ip) for failed-password / invalid-user lines.
 /// Single-space shapes only: `for  x` (double space) never matches,
-/// same as the Python regexes.
+/// Progresses left to right over every occurrence.
 pub fn fail_of(ln: &str) -> Option<(String, String)> {
     let mut pos = vec![];
     for pat in ["Failed password for ", "Failed publickey for "] {
@@ -438,7 +438,7 @@ mod tests {
             Some("77.91.71.90".to_string())
         );
         assert_eq!(probe_ip("Oct 7 x sudo: bob : TTY=pts/0"), None);
-        // Double space after "for" never matches (same as the Python regexes).
+        // Double space after "for" never matches.
         assert_eq!(fail_of("Oct 7 x sshd[1]: Failed password for  root from 1.2.3.4 port 5"), None);
         // Disconnect needs a version token between ip and port.
         assert_eq!(probe_ip("Oct 7 x sshd[1]: Disconnected from invalid user root 1.2.3.4 port 5"), None);

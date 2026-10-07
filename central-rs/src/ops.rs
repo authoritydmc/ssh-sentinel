@@ -17,7 +17,7 @@ pub fn geo_prime(state: &Arc<State>) {
     let mut v: Vec<(String, i64)> = per.into_iter().collect();
     v.sort_by(|a, b| b.1.cmp(&a.1));
     let ips: Vec<String> = v.into_iter().take(60).map(|(ip, _)| ip).collect();
-    // Exclude self like Python (mine check on fail lines only).
+    // Exclude self addresses (fail lines only).
     crate::geo::geo_lookup(&ips);
 }
 

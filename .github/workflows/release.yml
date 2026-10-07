@@ -45,19 +45,45 @@ jobs:
             --title "${GITHUB_REF_NAME}" \
             --notes-file /tmp/notes.md
 
-  agent-bin:
+  native-bin:
     needs: release
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            exe: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            exe: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: ".exe"
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            exe: ""
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            exe: ""
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - run: cargo build --release --target x86_64-unknown-linux-musl --manifest-path agent-rs/Cargo.toml
-      - run: cp agent-rs/target/x86_64-unknown-linux-musl/release/ssh-sentinel-agent ./ssh-sentinel-agent-x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - shell: bash
+        run: cargo build --release --target ${{ matrix.target }} -p ssh-sentinel -p ssh-sentinel-agent
+      - shell: bash
+        run: cp target/${{ matrix.target }}/release/ssh-sentinel${{ matrix.exe }} ./ssh-sentinel-${{ matrix.target }}${{ matrix.exe }}
+      - shell: bash
+        run: cp target/${{ matrix.target }}/release/ssh-sentinel-agent${{ matrix.exe }} ./ssh-sentinel-agent-${{ matrix.target }}${{ matrix.exe }}
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
-            ./ssh-sentinel-agent-x86_64-unknown-linux-musl --clobber
+            ./ssh-sentinel-${{ matrix.target }}${{ matrix.exe }} \
+            ./ssh-sentinel-agent-${{ matrix.target }}${{ matrix.exe }} --clobber

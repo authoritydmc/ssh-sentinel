@@ -1,9 +1,16 @@
 [package]
 name = "ssh-sentinel"
-version = "0.1.0"
-edition = "2021"
-description = "SSH Sentinel central in Rust. Full parity with central-rs."
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "SSH Sentinel central. Serves the SSH attack intel API plus UI."
 
 [[bin]]
 name = "ssh-sentinel"

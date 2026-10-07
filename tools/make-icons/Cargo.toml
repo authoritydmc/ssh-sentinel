@@ -1,0 +1,15 @@
+[package]
+name = "ssh-sentinel-icons"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+description = "Dev tool. Renders brand PNGs plus favicon.ico."
+
+[[bin]]
+name = "make-icons"
+path = "src/main.rs"
+
+[dependencies]
+image = "0.25"

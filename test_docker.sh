@@ -7,18 +7,8 @@ cd "$(dirname "$0")"
 IMG="ssh-sentinel:test"
 CONTAINER="ssh-sentinel-test-$$"
 
-pick_port() {
-  python3 - <<'PY' 2>/dev/null || true
-import socket
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-}
-
-HOST_PORT=$(pick_port)
-[ -z "${HOST_PORT:-}" ] && HOST_PORT=18079
+# Fixed ports per stage (override with env). No port picker needed.
+HOST_PORT="${HOST_PORT:-18079}"
 echo "Using host port: $HOST_PORT"
 
 cleanup() {
@@ -48,24 +38,31 @@ docker logs "$CONTAINER" 2>&1 | tail -n 5 || true
 echo "[3/7] Health + API checks (incl. public abusers feed)..."
 curl -s --max-time 20 -f "http://localhost:$HOST_PORT/healthz" | grep -q ok
 echo "[ OK ] /healthz -> ok"
-SUMMARY=$(curl -s --max-time 20 -f "http://localhost:$HOST_PORT/api/summary?host=all")
-echo "$SUMMARY" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['ips'] >= 1, d; print('[ OK ] /api/summary ips=%d total=%d' % (d['ips'], d['total']))"
-ABUSERS=$(curl -s --max-time 20 -f "http://localhost:$HOST_PORT/api/abusers?per_page=50")
-echo "$ABUSERS" | python3 -c "
-import json,sys,ipaddress
-d = json.load(sys.stdin)
-assert d['total'] >= 1 and d['abusers'], d
-blob = json.dumps(d['abusers'])
-assert 'Accepted' not in blob, 'accepted logins leaked'
-assert all(ipaddress.ip_address(a['ip']).is_global for a in d['abusers']), 'non-public IP leaked'
-assert set(d['abusers'][0].keys()) <= {'ip','hits','first','last','users','attempted_users','cc','country','city','org','asn','lat','lon','flag','risk','band','reasons'}, d['abusers'][0].keys()
-print('[ OK ] /api/abusers total=%d safe-fields-only' % d['total'])
-"
+is_global() {
+  case "$1" in
+    10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*|127.*|169.254.*|0.*|224.*|24[0-9].*|25*|\
+    100.6[4-9].*|100.7*|100.8*|100.9*|100.1[0-2]*|fc*|fd*|fe80*|::*1|::) return 1 ;;
+  esac
+  return 0
+}
+curl -s --max-time 20 -f "http://localhost:$HOST_PORT/api/summary?host=all" > /tmp/smoke-summary.json
+IPS=$(jq -r .ips /tmp/smoke-summary.json)
+TOTAL=$(jq -r .total /tmp/smoke-summary.json)
+[ "$IPS" -ge 1 ] || { echo "[FAIL] empty summary"; exit 1; }
+echo "[ OK ] /api/summary ips=$IPS total=$TOTAL"
+curl -s --max-time 20 -f "http://localhost:$HOST_PORT/api/abusers?per_page=50" > /tmp/smoke-abusers.json
+jq -e '.total >= 1 and (.abusers | length > 0)' /tmp/smoke-abusers.json >/dev/null
+jq -e '[.abusers[] | tojson] | join("") | contains("Accepted") | not' /tmp/smoke-abusers.json >/dev/null
+echo "[ OK ] abusers safe-fields-only"
+for ip in $(jq -r '.abusers[].ip' /tmp/smoke-abusers.json); do
+  is_global "$ip" || { echo "[FAIL] non-public IP listed: $ip"; exit 1; }
+done
+jq -e '(.abusers[0] | keys) - ["ip","hits","first","last","users","attempted_users","cc","country","city","org","asn","lat","lon","flag","risk","band","reasons"] | length == 0' /tmp/smoke-abusers.json >/dev/null
+echo "[ OK ] abuser keys exact"
 
 echo "[4/7] Local-auth gate (fail-closed default)..."
 ACONTAINER="${CONTAINER}-auth"
-AHOST_PORT=$(pick_port)
-[ -z "${AHOST_PORT:-}" ] && AHOST_PORT=18080
+AHOST_PORT="${AHOST_PORT:-18080}"
 HASH=$(docker run --rm "$IMG" /srv/ssh-sentinel genhash "smoke-pass" 2>/dev/null | grep -o 'pbkdf2-sha256\$[^ ]*')
 [ -z "${HASH:-}" ] && { echo "[FAIL] genhash produced no hash"; exit 1; }
 docker run -d --name "$ACONTAINER" -p "$AHOST_PORT:8079" \
@@ -92,8 +89,7 @@ docker rm -f "$ACONTAINER" >/dev/null 2>&1 || true
 
 echo "[5/7] Public abusers (open feed + page, whitelist honored)..."
 PCONTAINER="${CONTAINER}-pub"
-PHOST_PORT=$(pick_port)
-[ -z "${PHOST_PORT:-}" ] && PHOST_PORT=18082
+PHOST_PORT="${PHOST_PORT:-18082}"
 docker run -d --name "$PCONTAINER" -p "$PHOST_PORT:8079" \
   -e HOST_ID=smoke-pub -e AUTH_LOG=/srv/demo/auth.log.sample \
   -e AUTH_MODE=local -e AUTH_USER=smokeadmin -e AUTH_PASS_HASH="$HASH" \
@@ -105,15 +101,11 @@ if curl -s --max-time 20 "http://localhost:$PHOST_PORT/api/summary?host=all" | g
   echo "[FAIL] summary open despite local mode"; exit 1
 fi
 echo "[ OK ] /api/summary still gated"
-ABPUB=$(curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/api/abusers?per_page=50")
-echo "$ABPUB" | python3 -c "
-import json,sys
-d = json.load(sys.stdin)
-assert d['total'] >= 1, d
-assert not any(a['ip'] == '175.6.158.150' for a in d['abusers']), 'whitelisted IP listed'
-assert all(a['hits'] >= 5 and a['risk'] >= 25 and a['band'] in ('low','medium','high','critical') for a in d['abusers']), 'quality bar'
-print('[ OK ] /api/abusers open, whitelisted IP absent, scored')
-"
+curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/api/abusers?per_page=50" > /tmp/smoke-abpub.json
+jq -e '.total >= 1 and (.abusers | length > 0)' /tmp/smoke-abpub.json >/dev/null
+jq -e '[.abusers[].ip] | index("175.6.158.150") | not' /tmp/smoke-abpub.json >/dev/null
+jq -e '[.abusers[] | select(.hits >= 5 and .risk >= 25 and (.band == "low" or .band == "medium" or .band == "high" or .band == "critical"))] | length == (.abusers | length)' /tmp/smoke-abpub.json >/dev/null
+echo "[ OK ] /api/abusers open, whitelisted IP absent, scored"
 curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/abusers" | grep -q 'public abusers'
 echo "[ OK ] /abusers leaderboard page open"
 curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/api/self" | grep -q '"ip"'
@@ -122,8 +114,7 @@ docker rm -f "$PCONTAINER" >/dev/null 2>&1 || true
 
 echo "[6/7] Built-in OIDC gate (unconfigured IdP fails closed)..."
 OCONTAINER="${CONTAINER}-oidc"
-OHOST_PORT=$(pick_port)
-[ -z "${OHOST_PORT:-}" ] && OHOST_PORT=18081
+OHOST_PORT="${OHOST_PORT:-18081}"
 docker run -d --name "$OCONTAINER" -p "$OHOST_PORT:8079" \
   -e HOST_ID=smoke-oidc -e AUTH_LOG=/srv/demo/auth.log.sample \
   -e AUTH_MODE=oidc \
@@ -142,8 +133,7 @@ docker rm -f "$OCONTAINER" >/dev/null 2>&1 || true
 
 echo "[7/7] Admin setup + bans (fail-closed, banlist, activity)..."
 SCONTAINER="${CONTAINER}-adm"
-SHOST_PORT=$(pick_port)
-[ -z "${SHOST_PORT:-}" ] && SHOST_PORT=18083
+SHOST_PORT="${SHOST_PORT:-18083}"
 docker run -d --name "$SCONTAINER" -p "$SHOST_PORT:8079" \
   -e HOST_ID=smoke-adm -e AUTH_LOG=/srv/demo/auth.log.sample \
   -e AUTH_MODE=local -e ADMIN_SETUP_TOKEN=smoke-setup-token \
@@ -158,7 +148,8 @@ curl -s --max-time 20 -f -X POST "http://localhost:$SHOST_PORT/api/admin/setup" 
   -H 'Content-Type: application/json' \
   -d '{"token":"smoke-setup-token","user":"smokeadmin","password":"smoke-pass-123"}' | grep -q '"ok"'
 echo "[ OK ] first setup creates admin"
-IP=$(curl -s --max-time 20 -u smokeadmin:smoke-pass-123 "http://localhost:$SHOST_PORT/api/abusers?per_page=5" | python3 -c "import json,sys; print(json.load(sys.stdin)['abusers'][0]['ip'])")
+IP=$(curl -s --max-time 20 -u smokeadmin:smoke-pass-123 "http://localhost:$SHOST_PORT/api/abusers?per_page=5" | jq -r '.abusers[0].ip')
+[ -n "$IP" ] && [ "$IP" != "null" ] || { echo "[FAIL] no abuser IP"; exit 1; }
 curl -s --max-time 20 -f -X POST "http://localhost:$SHOST_PORT/api/admin/ban" \
   -u smokeadmin:smoke-pass-123 -H 'Content-Type: application/json' \
   -d "{\"ip\":\"$IP\",\"reason\":\"smoke\"}" | grep -q '"ok": *true'

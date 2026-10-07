@@ -1,8 +1,7 @@
 //! ssh-sentinel agent in Rust. Tails AUTH_LOG and pushes new lines.
 //!
-//! Protocol parity with agent-rs:
-//! env names, state file shape, ship filter, push URL, headers, log text.
-//! One change: a truncated file resets the offset (Python keeps stale offset).
+//! Wire shape: env names, state file, ship filter, push URL, headers, log text.
+//! A truncated file resets the offset to zero.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};

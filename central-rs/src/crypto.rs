@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn rs256_rfc7515_vector() {
-        // Same vector as scripts/selftest_oidc.py (RFC 7515 Appendix A.2).
+        // RFC 7515 Appendix A.2 test vector.
         let n_b64 = concat!(
             "ofgWCuLjybRlzo0tZWJjNiuSfb4p4fAkd_wWJcyQoTbji9k0l8W26mPddx",
             "HmfHQp-Vaw-4qPCJrcS2mJPMEzP1Pt0Bm4d4QlL-yRT-SFd2lZS-pCgNMs",

@@ -3,7 +3,7 @@
 > Style note: this document uses simplified English.
 > Sentences are short. Each sentence has one idea.
 
-## 1. Baseline (Python today)
+## 1. Baseline (old Python image)
 
 Measured in CI on 2026-10-07 (`footprint` job, demo log, idle):
 
@@ -17,53 +17,70 @@ Measured in CI on 2026-10-07 (`footprint` job, demo log, idle):
 
 The old image was multi-stage: node build plus `python:3.12-alpine` runtime.
 The new image is node build plus cargo build plus `debian-slim` runtime.
-The `footprint` job reprints these numbers on every run.
-The `rust-agent` job prints binary size plus parity result on every run.
+The `footprint` job reprints fresh numbers on every run.
 
-## 2. What moved to Rust
+## 2. Layout (workspace)
 
-The agent moved first. It is 114 lines of Python.
-The Rust pilot (`agent-rs/`) keeps full protocol parity.
-Central stays Python. No API change. No behavior change.
+One workspace at the repo root. Three crates inside.
 
-Why the agent first:
+| Crate | Binary | Role |
+| ----- | ------ | ---- |
+| `central-rs` | `ssh-sentinel` | API plus UI server |
+| `agent-rs` | `ssh-sentinel-agent` | Log shipper |
+| `tools/make-icons` | `make-icons` | Dev-only icon renderer, never shipped |
 
-- Small blast radius. One file. No auth logic.
-- Same env vars. Same state file. Drop-in swap.
-- Static musl binary runs on `scratch`. No interpreter. No certs needed.
+All crates use edition 2024. Versions track the repo `VERSION` file.
+Build all with `cargo build --workspace`. Test all with `cargo test --workspace`.
 
-## 3. Comparison method
+## 3. Install from cargo
 
-1. Read the `footprint` job summary for central size plus RSS.
-2. Read the `rust-agent` job log for binary size plus parity result.
-3. Build the Rust agent image (`agent-rs/Dockerfile`). Compare sizes.
-4. Run both agents against one central. Compare RSS via `docker stats`.
+From source (needs a Rust toolchain):
 
-## 4. Measured gains (agent pilot)
+```bash
+cargo install --git https://github.com/authoritydmc/ssh-sentinel ssh-sentinel
+cargo install --git https://github.com/authoritydmc/ssh-sentinel ssh-sentinel-agent
+```
 
-- Rust agent binary: 1.7 MB release (rustls embeds crypto).
-- Rust agent image: about 5 MB on `scratch` (binary plus zero base).
-- Python agent shares the 56 MB central image locally.
-- Parity test passes: push plus rotation plus state file.
-- RSS saving per agent host is real but small. Matters on tiny nodes only.
-- Central rewrite would save more, but costs a full rewrite of 3,044 lines.
+From crates.io after the first publish:
 
-## 5. Risks of a central rewrite
+```bash
+cargo install ssh-sentinel
+cargo install ssh-sentinel-agent
+```
 
-- Auth gates are subtle. Four modes. Fail-closed defaults.
-- OIDC uses a hand-rolled RS256 verify. A rewrite must preserve it exactly.
-- Log parsing has syslog plus ISO edge cases. Drift hides attacks.
-- SQLite store plus ban plus report flows need full retesting.
-- Two codebases need dual maintenance during migration.
+Publish howto for the owner: `cargo login`, then
+`cargo publish -p ssh-sentinel-agent`, then `cargo publish -p ssh-sentinel`.
+CI already runs `cargo publish --dry-run` for both crates on every PR.
 
-## 6. Swap done (central in Rust)
+## 4. Native release binaries
 
-The owner approved the full switch. Python is gone from runtime.
+Every tag builds both binaries for four targets. Assets attach
+to the GitHub Release automatically. Names carry the target triple:
+
+| Target | Runner | Asset suffix |
+| ------ | ------ | ------------ |
+| `x86_64-unknown-linux-musl` | ubuntu | static, runs anywhere |
+| `x86_64-pc-windows-msvc` | windows | plus `.exe` |
+| `aarch64-apple-darwin` | macOS arm | Apple Silicon |
+| `x86_64-apple-darwin` | macOS Intel | Intel Macs |
+
+Linux members use `agent/install.sh`. It fetches the musl asset.
+macOS and Windows users download the asset and run it directly.
+
+## 5. Versions and tags
+
+Tags are always semver (`vX.Y.Z` via `scripts/release.sh`). No date tags.
+Docker tags follow the release: `X.Y.Z`, `X.Y`, `latest`, `prod.<sha>`.
+Crate versions track the repo `VERSION` file. Bump them with each release.
+
+## 6. Swap record (central in Rust)
+
+Python is gone from code, image, and CI (only release history mentions it).
 
 - `central-rs` serves the API plus UI. Same routes, same DB schema.
 - `agent-rs` ships logs. Static musl binary in GitHub Releases.
 - The image holds no Python and no build tools.
-- Parity was proven before the swap (Python versus Rust diff, all green).
+- Equivalence was proven before the swap (Python versus Rust diff, all green).
 - Post-swap safety comes from `cargo test` plus `smoke-central.sh` in CI.
 
 ## 7. New numbers after the swap

@@ -1,4 +1,4 @@
-//! HTTP server and routing. Mirrors central-rs paths and payloads.
+//! HTTP server and routing for every API path plus the UI bundle.
 
 use crate::auth;
 use crate::config::{Cfg, Eff};
@@ -681,9 +681,9 @@ fn self_check(state: &State, req: &Req) -> Resp {
 }
 
 fn is_global_ip(a: std::net::IpAddr) -> bool {
-    // Mirrors Python "not mine.is_global": only loopback/link-local/reserved
+    // Non-global here means only loopback, link-local, unspecified, multicast, reserved.
     // count as non-global here (ipaddress is_global is False for private too,
-    // but the Python message branch checks is_global which is False for
+    // Private tailnet addresses still count as global for this message.
     // private addresses as well). Use util public-plus-private notion:
     // non-global = loopback, link-local, unspecified, multicast, reserved.
     match a {
