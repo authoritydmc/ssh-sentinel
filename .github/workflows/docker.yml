@@ -23,7 +23,14 @@ jobs:
       - name: Run Docker smoke test (local build)
         run: |
           chmod +x test_docker.sh
-          ./test_docker.sh
+          SHOT_PATH=/tmp/ui-shot.png ./test_docker.sh
+
+      - name: Upload dashboard screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-shot
+          path: /tmp/ui-shot.png
+          if-no-files-found: error
 
   footprint:
     runs-on: ubuntu-latest
