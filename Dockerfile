@@ -11,12 +11,15 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY central-rs/Cargo.toml central-rs/
 COPY agent-rs/Cargo.toml agent-rs/
-RUN mkdir -p central-rs/src agent-rs/src \
+COPY tools/make-icons/Cargo.toml tools/make-icons/
+RUN mkdir -p central-rs/src agent-rs/src tools/make-icons/src \
   && echo 'fn main() {}' > central-rs/src/main.rs \
   && echo 'fn main() {}' > agent-rs/src/main.rs \
+  && echo 'fn main() {}' > tools/make-icons/src/main.rs \
   && cargo build --release -p ssh-sentinel -p ssh-sentinel-agent
 COPY central-rs/ central-rs/
 COPY agent-rs/ agent-rs/
+COPY tools/ tools/
 # COPY keeps old mtimes, so cargo would call the dummy build fresh.
 # Touch sources first to force a real rebuild.
 RUN find central-rs/src agent-rs/src -exec touch {} + \
