@@ -15,6 +15,9 @@ Read this file before you change code. Obey all rules in it.
 
 - `backend/server.py` — API + UI server. Standard library only. No new deps.
 - `agent/agent.py` — log shipper. Standard library only.
+- `central-rs/` — Rust central. Full endpoint parity. Checks via WSL.
+- `agent-rs/` — Rust shipper. Same push protocol as Python.
+- `skills/rust-wsl/SKILL.md` — the only way to run Rust commands.
 - `frontend/` — React 19 + Vite + Tailwind. `npm run lint`, `npm run build`.
 - `docker/entrypoint.sh` — selects `ROLE=central|agent`.
 - `docs/ARCHITECTURE.md` — design truth. Update it when design changes.
@@ -33,13 +36,15 @@ Read this file before you change code. Obey all rules in it.
 1. `python3 -m compileall -q backend/server.py agent/agent.py demo/gen_auth_log.py`
 2. `python3 scripts/selftest_oidc.py`
 3. `cd frontend && npm run lint && npm run build`
-4. For backend behavior changes: run the server with the demo log and test
+4. For Rust changes: use `skills/rust-wsl/SKILL.md`. Run `cargo check`,
+   `cargo test`, and release build through WSL only.
+5. For backend behavior changes: run the server with the demo log and test
    each mode you touched (`none`, `local`, `forward`, `oidc`) plus `/api/abusers`.
-5. Commit with a conventional message: `feat|fix|chore|docs(scope): text`.
-6. Open a PR to `master` and write the description with
+6. Commit with a conventional message: `feat|fix|chore|docs(scope): text`.
+7. Open a PR to `master` and write the description with
    `skills/pr-writing/SKILL.md`.
    Confirm `ci` + `Docker Image CI-PROD master` are green.
-7. Confirm the new Hub/GHCR tags exist before you claim success.
+8. Confirm the new Hub/GHCR tags exist before you claim success.
 
 ## 5. Git hooks
 

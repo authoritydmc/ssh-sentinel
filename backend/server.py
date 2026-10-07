@@ -3033,12 +3033,16 @@ if __name__ == "__main__":
             _effective_local_user(),
             "configured" if _local_configured() else "MISSING (deny-all)"),
             flush=True)
-    httpd = ThreadingHTTPServer(("0.0.0.0", 8079), H)
+    try:
+        PORT = max(1, min(65535, int(os.environ.get("PORT", "8079"))))
+    except ValueError:
+        PORT = 8079
+    httpd = ThreadingHTTPServer(("0.0.0.0", PORT), H)
     if TLS_CERT and TLS_KEY:
         import ssl as _ssl
         _ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
         _ctx.minimum_version = _ssl.TLSVersion.TLSv1_3
         _ctx.load_cert_chain(TLS_CERT, TLS_KEY)
         httpd.socket = _ctx.wrap_socket(httpd.socket, server_side=True)
-        print("tls: 1.3-only on :8079 (cert %s)" % TLS_CERT, flush=True)
+        print("tls: 1.3-only on :%d (cert %s)" % (PORT, TLS_CERT), flush=True)
     httpd.serve_forever()

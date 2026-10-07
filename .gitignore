@@ -28,6 +28,9 @@ htmlcov/
 .venv/
 venv/
 
+# rust build output never tracked (lockfiles are committed)
+target/
+
 # logs & os
 *.log
 .DS_Store
