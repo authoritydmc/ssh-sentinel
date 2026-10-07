@@ -16,6 +16,8 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+# rust build output - never in image (also keeps cargo fingerprints sane)
+target/
 
 # frontend build inputs that are re-installed
 frontend/node_modules

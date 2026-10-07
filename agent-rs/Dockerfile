@@ -7,7 +7,10 @@ COPY agent-rs/Cargo.toml ./
 RUN mkdir -p src && echo 'fn main() {}' > src/main.rs \
   && cargo build --release || true
 COPY agent-rs/ ./
-RUN cargo build --release \
+# COPY keeps old mtimes, so cargo would call the dummy build fresh.
+# Touch sources first to force a real rebuild.
+RUN find src -exec touch {} + \
+  && cargo build --release \
   && cp "$(ls target/*/release/ssh-sentinel-agent | head -1)" /agent-bin \
   && ls -l /agent-bin
 

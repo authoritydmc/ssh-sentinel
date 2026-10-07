@@ -17,7 +17,10 @@ RUN mkdir -p central-rs/src agent-rs/src \
   && cargo build --release --manifest-path agent-rs/Cargo.toml
 COPY central-rs/ central-rs/
 COPY agent-rs/ agent-rs/
-RUN cargo build --release --manifest-path central-rs/Cargo.toml \
+# COPY keeps old mtimes, so cargo would call the dummy build fresh.
+# Touch sources first to force a real rebuild.
+RUN find central-rs/src agent-rs/src -exec touch {} + \
+  && cargo build --release --manifest-path central-rs/Cargo.toml \
   && cargo build --release --manifest-path agent-rs/Cargo.toml \
   && ls -l central-rs/target/release/ssh-sentinel agent-rs/target/release/ssh-sentinel-agent
 
