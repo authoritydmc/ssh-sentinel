@@ -1,0 +1,29 @@
+[package]
+name = "ssh-sentinel"
+version = "0.1.0"
+edition = "2021"
+description = "SSH Sentinel central in Rust. Full parity with backend/server.py."
+license = "MIT"
+
+[[bin]]
+name = "ssh-sentinel"
+path = "src/main.rs"
+
+[dependencies]
+tiny_http = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1.0"
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
+base64 = "0.22"
+sha2 = "0.10"
+pbkdf2 = "0.12"
+ring = "0.17"
+rand = "0.8"
+hex = "0.4"
+hostname = "0.4"
+chrono = "0.4"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

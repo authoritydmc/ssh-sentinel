@@ -45,3 +45,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: chmod +x scripts/parity-agent.sh && AGENT_BIN=agent-rs/target/release/ssh-sentinel-agent bash scripts/parity-agent.sh
+
+  parity-central:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: cargo build --manifest-path central-rs/Cargo.toml
+      - run: chmod +x scripts/parity-central.sh && RSBIN=central-rs/target/debug/ssh-sentinel bash scripts/parity-central.sh
