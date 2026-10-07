@@ -469,6 +469,18 @@ REPORT_MIN_RISK = _int_env("REPORT_MIN_RISK", 60, 0, 100)
 REPORT_MIN_HITS = _int_env("REPORT_MIN_HITS", 20, 2, 100000)
 ABUSE_WEBHOOK_URL = os.environ.get("ABUSE_WEBHOOK_URL", "").rstrip("/")
 ABUSE_WEBHOOK_TOKEN = os.environ.get("ABUSE_WEBHOOK_TOKEN", "")
+# --- login + spike alerts (issue #25) --------------------------------------
+# ALERT_WEBHOOK_URL: POST JSON {event, ip, user, hits, ...} on suspicious
+# Accepted login (ALERT_ON_SUCCESS=1) or brute-force spike (> threshold
+# fails in window). Falls back to ABUSE_WEBHOOK_URL when unset. Dedupe per
+# key for ALERT_DEDUPE_S. Stdlib only, best-effort, never blocks the API.
+ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").rstrip("/") or ABUSE_WEBHOOK_URL
+ALERT_WEBHOOK_TOKEN = os.environ.get("ALERT_WEBHOOK_TOKEN", "") or ABUSE_WEBHOOK_TOKEN
+ALERT_ON_SUCCESS = _bool_env("ALERT_ON_SUCCESS", True)
+ALERT_SPIKE_THRESHOLD = _int_env("ALERT_SPIKE_THRESHOLD", 20, 2, 100000)
+ALERT_SPIKE_WINDOW_S = _int_env("ALERT_SPIKE_WINDOW_S", 300, 60, 86400)
+ALERT_DEDUPE_S = _int_env("ALERT_DEDUPE_S", 3600, 60, 7 * 86400)
+_alert_sent = {}
 
 
 def _valid_ip(s):
@@ -810,7 +822,59 @@ def admin_status():
             "ban_window": BAN_WINDOW,
             "report_enabled": REPORT_ENABLED, "report_provider": REPORT_PROVIDER,
             "report_throttle_days": REPORT_THROTTLE_DAYS,
+            "alert_configured": bool(ALERT_WEBHOOK_URL),
+            "alert_on_success": ALERT_ON_SUCCESS,
+            "alert_spike_threshold": ALERT_SPIKE_THRESHOLD,
+            "alert_spike_window_s": ALERT_SPIKE_WINDOW_S,
             "auth_mode": AUTH_MODE, "version": os.environ.get("APP_VERSION", "dev")}
+
+
+def _alert_send(event, payload):
+    """POST one alert. Dedupe per key. Returns True if sent."""
+    if not ALERT_WEBHOOK_URL:
+        return False
+    key = event + ":" + str(payload.get("ip", "")) + ":" + str(payload.get("user", ""))
+    if time.time() - _alert_sent.get(key, 0) < ALERT_DEDUPE_S:
+        return False
+    _alert_sent[key] = time.time()
+    try:
+        body = {"event": event, "source": "ssh-sentinel",
+                "ts": int(time.time() * 1000)}
+        body.update(payload)
+        headers = {"Content-Type": "application/json",
+                   "User-Agent": "ssh-sentinel-alert/1.0"}
+        if ALERT_WEBHOOK_TOKEN:
+            headers["Authorization"] = "Bearer " + ALERT_WEBHOOK_TOKEN
+        req = urllib.request.Request(ALERT_WEBHOOK_URL, data=json.dumps(body).encode(),
+                                     headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read(4096)
+        activity_log("system", "alert", str(payload.get("ip", "")), event)
+        return True
+    except Exception:
+        _alert_sent.pop(key, None)
+        return False
+
+
+def maybe_alert(summ):
+    """Fire success + spike alerts from a computed summary. Best-effort."""
+    if not ALERT_WEBHOOK_URL:
+        return
+    try:
+        if ALERT_ON_SUCCESS:
+            for e in (summ.get("logins") or [])[-10:]:
+                if e.get("suspicious"):
+                    _alert_send("login.suspicious",
+                                {"ip": e.get("ip"), "user": e.get("user"),
+                                 "reason": e.get("reason")})
+        now_ms = summ.get("now", int(time.time() * 1000))
+        win_start = now_ms - ALERT_SPIKE_WINDOW_S * 1000
+        recent = sum(f for (h, f, _o) in (summ.get("timeline") or []) if h >= win_start)
+        if recent >= ALERT_SPIKE_THRESHOLD:
+            _alert_send("spike.bruteforce", {"hits": recent,
+                                             "window_s": ALERT_SPIKE_WINDOW_S})
+    except Exception:
+        pass
 
 
 try:
@@ -2093,7 +2157,9 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/summary":
             try:
                 host = (q.get("host", [""])[0] or "")[:64] or None
-                return self._send(json.dumps(summary(host)), "application/json")
+                s = summary(host)
+                maybe_alert(s)
+                return self._send(json.dumps(s), "application/json")
             except Exception as e:
                 return self._send(json.dumps({"error": type(e).__name__}),
                                    "application/json", 500)
@@ -2262,6 +2328,16 @@ class H(BaseHTTPRequestHandler):
                                   "application/json", 500)
             activity_log(user, "setup", "", "initial admin created")
             return self._send(json.dumps({"ok": True, "user": user}), "application/json")
+        if u.path == "/api/alerts/test":
+            _, gate = self._gate()
+            if gate is not None:
+                return self._deny(gate)
+            if not ALERT_WEBHOOK_URL:
+                return self._send(json.dumps({"ok": False,
+                                               "error": "ALERT_WEBHOOK_URL is empty"}),
+                                   "application/json", 400)
+            ok = _alert_send("test.ping", {"msg": "ssh-sentinel test alert"})
+            return self._send(json.dumps({"ok": ok}), "application/json")
         if u.path == "/api/recon":
             _, gate = self._gate()
             if gate is not None:

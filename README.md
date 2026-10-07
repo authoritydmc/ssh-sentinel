@@ -309,6 +309,8 @@ curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 | `RECON_PROVIDER` | `spiderfoot` | central | `spiderfoot` (needs `SPIDERFOOT_URL`) \| `webhook` (POST `{ip}` to `RECON_WEBHOOK_URL`, returns `{findings:[{type,data,module}]}`) \| `none` (recon disabled) |
 | `RECON_WEBHOOK_URL` / `RECON_WEBHOOK_TOKEN` | `` | central | Your intel hook (n8n, custom API…) + optional Bearer |
 | `ABUSERS_RPM` | `60` | central | `/api/abusers` per-client-IP requests/minute (`429` past budget) |
+| `ALERT_WEBHOOK_URL` / `ALERT_WEBHOOK_TOKEN` | `` | central | Login + spike alerts (`login.suspicious`, `spike.bruteforce`); falls back to abuse webhook; test via `POST /api/alerts/test` |
+| `ALERT_ON_SUCCESS` / `ALERT_SPIKE_THRESHOLD` / `ALERT_SPIKE_WINDOW_S` / `ALERT_DEDUPE_S` | `1` / `20` / `300` / `3600` | central | Alert tuning: suspicious logins on, spike bar, window seconds, resend delay |
 | `TLS_CERT` / `TLS_KEY` | `` | central | Container paths to PEM cert/key — enables in-repo TLS 1.3-only listener (else terminate at Tailscale/Traefik) |
 
 Files:

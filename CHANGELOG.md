@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Login + spike alerting (issue #25): `ALERT_WEBHOOK_URL` (+ optional `ALERT_WEBHOOK_TOKEN`, falls back to abuse webhook) posts `login.suspicious` and `spike.bruteforce` events from `/api/summary`, with `ALERT_ON_SUCCESS` / `ALERT_SPIKE_THRESHOLD` / `ALERT_SPIKE_WINDOW_S` / `ALERT_DEDUPE_S` tuning and `POST /api/alerts/test` for checks.
+
 ## [0.4.0] - 2026-10-07
 
 ### Added
