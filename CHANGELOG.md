@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - Ban list shows created plus remaining plus firewall state. Expires text explains monitor-only mode.
+- Bytecode never ships: `.gitignore` plus `.dockerignore` cover `__pycache__`, `*.pyc`, test caches, and local DBs. Image sets `PYTHONDONTWRITEBYTECODE=1` plus `PYTHONUNBUFFERED=1`.
 
 ## [0.6.0] - 2026-10-07
 
