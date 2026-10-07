@@ -102,9 +102,18 @@ if curl -s --max-time 20 "http://localhost:$PHOST_PORT/api/summary?host=all" | g
 fi
 echo "[ OK ] /api/summary still gated"
 curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/api/abusers?per_page=50" > /tmp/smoke-abpub.json
-jq -e '.total >= 1 and (.abusers | length > 0)' /tmp/smoke-abpub.json >/dev/null
-jq -e '[.abusers[].ip] | index("175.6.158.150") | not' /tmp/smoke-abpub.json >/dev/null
-jq -e '[.abusers[] | select(.hits >= 5 and .risk >= 25 and (.band == "low" or .band == "medium" or .band == "high" or .band == "critical"))] | length == (.abusers | length)' /tmp/smoke-abpub.json >/dev/null
+chk() {
+  # $1 = jq filter, $2 = label. Dumps the body on failure.
+  if ! jq -e "$1" /tmp/smoke-abpub.json >/dev/null; then
+    echo "[FAIL] $2; body was:"
+    head -c 500 /tmp/smoke-abpub.json; echo
+    exit 1
+  fi
+}
+chk '.total >= 1 and (.abusers | length > 0)' "empty abusers feed"
+chk '[.abusers[] | tojson] | join("") | contains("Accepted") | not' "accepted leak"
+chk '[.abusers[].ip] | index("175.6.158.150") | not' "whitelisted IP listed"
+chk '[.abusers[] | select(.hits >= 5 and .risk >= 25 and (.band == "low" or .band == "medium" or .band == "high" or .band == "critical"))] | length == (.abusers | length)' "quality bar"
 echo "[ OK ] /api/abusers open, whitelisted IP absent, scored"
 curl -s --max-time 20 -f "http://localhost:$PHOST_PORT/abusers" | grep -q 'public abusers'
 echo "[ OK ] /abusers leaderboard page open"
