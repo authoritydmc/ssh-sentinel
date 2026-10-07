@@ -711,6 +711,13 @@ pub fn host_path(cfg: &Cfg, host: &str) -> String {
     format!("{}/hosts/{}.jsonl", cfg.data_dir.trim_end_matches('/'), s)
 }
 
+// Canonical sidecar for a host log. Readers and writers must agree:
+// "<data>/hosts/<id>.meta" (NOT "<id>.jsonl.meta").
+pub fn host_meta_path(cfg: &Cfg, host: &str) -> String {
+    let p = host_path(cfg, host);
+    format!("{}.meta", p.trim_end_matches(".jsonl"))
+}
+
 pub fn store_pushed_lines(ctx: &Ctx, host: &str, lines: &[String]) {
     use crate::logparse as L;
     let _ = std::fs::create_dir_all(format!("{}/hosts", ctx.cfg.data_dir.trim_end_matches('/')));
@@ -754,7 +761,7 @@ pub fn store_pushed_lines(ctx: &Ctx, host: &str, lines: &[String]) {
             let _ = std::fs::write(&p, all.join("\n") + "\n");
         }
         let meta = serde_json::json!({"host": host, "last_seen": crate::clock_secs() as f64, "lines": all.len()}).to_string();
-        let _ = std::fs::write(p + ".meta", meta);
+        let _ = std::fs::write(host_meta_path(ctx.cfg, host), meta);
     }
 }
 
@@ -774,8 +781,10 @@ pub fn list_hosts(ctx: &Ctx) -> Vec<serde_json::Value> {
         for fn_ in names {
             let id = fn_.trim_end_matches(".jsonl").to_string();
             let (mut last, mut n) = (0.0f64, 0i64);
-            let mp = format!("{}/hosts/{}.meta", ctx.cfg.data_dir.trim_end_matches('/'), id);
-            if let Ok(t) = std::fs::read_to_string(mp) {
+            let mp = host_meta_path(ctx.cfg, &id);
+            let legacy = format!("{}.jsonl.meta", host_path(ctx.cfg, &id).trim_end_matches(".jsonl"));
+            let t = std::fs::read_to_string(&mp).or_else(|_| std::fs::read_to_string(&legacy));
+            if let Ok(t) = t {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
                     last = v.get("last_seen").and_then(|x| x.as_f64()).unwrap_or(0.0);
                     n = v.get("lines").and_then(|x| x.as_i64()).unwrap_or(0);
@@ -811,6 +820,37 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_meta_path_agrees_with_reader() {
+        // Regression: writers used "<id>.jsonl.meta" while list_hosts read
+        // "<id>.meta", so every pushing agent showed offline forever.
+        let dir = std::env::temp_dir().join(format!("sentinel-meta-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data = dir.to_string_lossy().to_string();
+        let cfg = Cfg::load(String::new(), data.clone());
+        let jp = host_path(&cfg, "oracle2");
+        let mp = host_meta_path(&cfg, "oracle2");
+        assert!(jp.ends_with("/hosts/oracle2.jsonl"), "{}", jp);
+        assert_eq!(mp, format!("{}/hosts/oracle2.meta", data.trim_end_matches('/')));
+        let db = Db::new(&data);
+        let ctx = Ctx { cfg: &cfg, db: &db, eff: Eff { db: &db } };
+        let sample = "Oct  7 10:00:01 vps sshd[11]: Failed password for root from 1.2.3.4 port 5001 ssh2\n";
+        std::fs::write(&jp, sample).unwrap();
+        // legacy 0.7.0/0.7.1 sidecar must still count as online
+        let legacy = format!("{}.jsonl.meta", jp.trim_end_matches(".jsonl"));
+        std::fs::write(&legacy, r#"{"host":"oracle2","last_seen":9999999999.0,"lines":1}"#).unwrap();
+        let h = list_hosts(&ctx).into_iter().find(|h| h.get("id").and_then(|x| x.as_str()) == Some("oracle2")).expect("oracle2 listed");
+        assert_eq!(h.get("online"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(h.get("lines"), Some(&serde_json::json!(1)));
+        // canonical sidecar written by store_pushed_lines reads back online too
+        std::fs::remove_file(&legacy).unwrap();
+        store_pushed_lines(&ctx, "oracle2", &["Oct  7 10:00:01 vps sshd[11]: Failed password for root from 1.2.3.4 port 5001 ssh2".to_string()]);
+        assert!(std::path::Path::new(&mp).exists(), "canonical meta written");
+        let h = list_hosts(&ctx).into_iter().find(|h| h.get("id").and_then(|x| x.as_str()) == Some("oracle2")).expect("oracle2 listed");
+        assert_eq!(h.get("online"), Some(&serde_json::Value::Bool(true)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn risk_bands() {

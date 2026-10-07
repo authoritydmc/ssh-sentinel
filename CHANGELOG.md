@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Fleet online status: central wrote agent sidecars as `<id>.jsonl.meta` but read `<id>.meta`,
+  so every pushing agent showed offline forever. Writers now use the canonical `<id>.meta` path
+  and the reader falls back to the legacy name.
+
 ## [0.7.1] - 2026-10-07
 
 ## [0.7.0] - 2026-10-07
