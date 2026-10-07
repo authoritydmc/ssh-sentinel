@@ -17,6 +17,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.7.0] - 2026-10-07
 
 ### Added
+- Gallery in README with 8 masked screenshots. Only attacker data shows.
+  Log-line shots stay out: raw lines carry the node host name.
 - Rust runtime for central plus agent. No Python in code, image, or CI.
   `central-rs` serves the API plus UI. `agent-rs` ships logs.
   Same API, same DB schema, same CLI (`gentoken`, `genhash`, `scrub`).
