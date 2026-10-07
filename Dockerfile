@@ -12,7 +12,8 @@ ARG GIT_COMMIT=unknown
 LABEL org.opencontainers.image.title="ssh-sentinel" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}"
-ENV APP_VERSION=${APP_VERSION} GIT_COMMIT=${GIT_COMMIT}
+ENV APP_VERSION=${APP_VERSION} GIT_COMMIT=${GIT_COMMIT} \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
 COPY backend/server.py ./server.py
 COPY agent/agent.py ./agent.py

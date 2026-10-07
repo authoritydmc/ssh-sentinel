@@ -9,7 +9,13 @@
 data/
 backend/data/
 *.log
+*.db
+*.db-wal
+*.db-shm
 __pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
 
 # frontend build inputs that are re-installed
 frontend/node_modules

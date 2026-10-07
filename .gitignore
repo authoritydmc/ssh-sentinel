@@ -16,10 +16,15 @@ agents.json
 .env.*
 !.env.example
 
-# python
+# python - bytecode never tracked
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
 .venv/
 venv/
 
