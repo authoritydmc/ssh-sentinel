@@ -4,7 +4,7 @@ const api = (p: string) => `${BASE}api/${p}`;
 
 export interface TopEntry {
   user: string; ip: string; hits: number; flag: string; cc: string;
-  country: string; city: string; org: string; lat: number | null; lon: number | null;
+  country: string; city: string; org: string; asn?: string; lat: number | null; lon: number | null;
   recon: { state: string; count: number };
 }
 export interface LoginEntry {

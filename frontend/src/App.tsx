@@ -254,7 +254,17 @@ function Shell() {
           )}
 
           {view === 'attackers' && (
-            <Card title="All attackers" icon={<Crosshair size={15} className="text-[#f85149]" />}>
+            <Card title="All attackers" icon={<Crosshair size={15} className="text-[#f85149]" />}
+              action={!data ? undefined : (
+                <button onClick={() => {
+                  const csv = 'ip,hits,user,country,city,org,asn\n' + data.top.map((t) =>
+                    [t.ip, t.hits, t.user, t.cc, `"${(t.city || '').replace(/"/g, "'")}"`,
+                     `"${(t.org || '').replace(/"/g, "'")}"`, `"${((t as { asn?: string }).asn || '').replace(/"/g, "'")}"`].join(',')).join('\n');
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                  a.download = 'ssh-attackers.csv'; a.click();
+                }} className="text-xs text-[#58a6ff] hover:underline">CSV ↓</button>
+              )}>
               {!data ? <Skeleton className="h-64" /> : <AttackerTable rows={data.top} onIp={setModalIp} full />}
             </Card>
           )}
@@ -423,7 +433,7 @@ export function AttackerTable({ rows, onIp, full }: { rows: Summary['top']; onIp
         <table className="w-full min-w-[640px] text-sm">
           <thead><tr className="text-left text-xs text-[#8b98ad]">
             <th className="pb-2 pr-3 font-medium"></th><th className="pb-2 pr-3 font-medium">User</th><th className="pb-2 pr-3 font-medium">IP</th>
-            <th className="pb-2 pr-3 font-medium">Hits</th><th className="pb-2 pr-3 font-medium">Origin</th><th className="pb-2 font-medium">Recon</th>
+            <th className="pb-2 pr-3 font-medium">Hits</th><th className="pb-2 pr-3 font-medium">Origin</th><th className="pb-2 pr-3 font-medium">ASN</th><th className="pb-2 font-medium">Recon</th>
           </tr></thead>
           <tbody>
             {filtered.map((t) => (
@@ -433,6 +443,7 @@ export function AttackerTable({ rows, onIp, full }: { rows: Summary['top']; onIp
                 <td className="py-2 pr-3 font-mono text-[#a5d6ff]">{maskIp(t.ip, masked)}</td>
                 <td className="py-2 pr-3 font-bold">{t.hits}</td>
                 <td className="py-2 pr-3 text-[#8b98ad]">{[t.city, t.country].filter(Boolean).join(', ') || t.cc || '—'}</td>
+                <td className="py-2 pr-3 font-mono text-xs text-[#8b98ad]">{((t as { asn?: string }).asn || '').replace(/^AS\d+\s*/, '') || (t as { asn?: string }).asn || '—'}</td>
                 <td className="py-2">{t.recon.count ? <Badge tone="info">🔍 {t.recon.count}</Badge> : <span className="text-[#5b6b82]">…</span>}</td>
               </tr>
             ))}

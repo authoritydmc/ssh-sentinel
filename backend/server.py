@@ -33,6 +33,16 @@ try:
     MAX_LINES_PER_HOST = max(1000, int(os.environ.get("MAX_LINES_PER_HOST", "60000")))
 except ValueError:
     MAX_LINES_PER_HOST = 60000
+# Log source + retention (issue #26).
+# LOG_SOURCE=file (default, $AUTH_LOG) | journald (`journalctl _COMM=sshd`).
+# RETENTION_DAYS: prune stored host lines older than N days on push (0=off).
+LOG_SOURCE = os.environ.get("LOG_SOURCE", "file").strip().lower()
+if LOG_SOURCE not in ("file", "journald"):
+    LOG_SOURCE = "file"
+try:
+    RETENTION_DAYS = max(0, min(3650, int(os.environ.get("RETENTION_DAYS", "0"))))
+except ValueError:
+    RETENTION_DAYS = 0
 # Privacy / redaction config.
 # SHIP_FILTER: sshd-only (default) keeps sshd + pam_unix(sshd:session) lines,
 #   drops sudo/CRON/systemd noise that leaks cwd/commands. Use "full" for debug.
@@ -1216,6 +1226,11 @@ def store_pushed_lines(host, lines):
     try:
         with open(p) as f:
             all_lines = f.readlines()
+        if RETENTION_DAYS > 0:
+            cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
+            now0 = datetime.now()
+            fresh = [ln for ln in all_lines if (parse_ts(ln, now0) or cutoff) >= cutoff]
+            all_lines = fresh if len(fresh) >= 1000 else all_lines[-1000:]
         if len(all_lines) > MAX_LINES_PER_HOST:
             with open(p, "w") as f:
                 f.writelines(all_lines[-MAX_LINES_PER_HOST:])
@@ -1595,8 +1610,19 @@ def _hour_ms(dt):
 
 
 def read_lines(host=None):
-    """Local auth.log, or a joined agent's pushed lines. host='all' merges."""
+    """Local auth.log (or journald), or a joined agent's pushed lines. host='all' merges."""
     if not host or host == HOST_ID:
+        if LOG_SOURCE == "journald":
+            try:
+                import subprocess as _sp
+                r = _sp.run(["journalctl", "_COMM=sshd", "-o", "short-iso",
+                             "--no-pager", "-n", "20000"],
+                            capture_output=True, timeout=15, text=True)
+                if r.returncode == 0 and r.stdout:
+                    return [l + "\n" for l in r.stdout.splitlines()]
+            except Exception:
+                pass
+            return []
         try:
             with open(LOG, errors="replace") as f:
                 return f.readlines()
@@ -1709,6 +1735,7 @@ def summary(host=None):
                     "flag": flag(g.get("cc", "")), "cc": g.get("cc", ""),
                     "country": g.get("country", ""), "city": g.get("city", ""),
                     "org": g.get("org", "") or g.get("isp", ""),
+                    "asn": g.get("as", ""),
                     "lat": g.get("lat"), "lon": g.get("lon"),
                     "recon": {"state": rc.get("state", ""),
                               "count": rc.get("count", 0) if rc.get("done") else 0}})

@@ -311,6 +311,13 @@ curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 | `ABUSERS_RPM` | `60` | central | `/api/abusers` per-client-IP requests/minute (`429` past budget) |
 | `ALERT_WEBHOOK_URL` / `ALERT_WEBHOOK_TOKEN` | `` | central | Login + spike alerts (`login.suspicious`, `spike.bruteforce`); falls back to abuse webhook; test via `POST /api/alerts/test` |
 | `ALERT_ON_SUCCESS` / `ALERT_SPIKE_THRESHOLD` / `ALERT_SPIKE_WINDOW_S` / `ALERT_DEDUPE_S` | `1` / `20` / `300` / `3600` | central | Alert tuning: suspicious logins on, spike bar, window seconds, resend delay |
+
+### n8n alert flow (2 min)
+
+1. n8n → Import `examples/n8n-ssh-alerts.json`, activate, copy the test URL.
+2. Set `ALERT_WEBHOOK_URL` to that URL (Coolify env or `.env`).
+3. Replace the `Notify (edit me)` node with Slack/Telegram/email.
+4. `curl -X POST <central>/api/alerts/test` → execution appears in n8n.
 | `TLS_CERT` / `TLS_KEY` | `` | central | Container paths to PEM cert/key — enables in-repo TLS 1.3-only listener (else terminate at Tailscale/Traefik) |
 
 Files:
