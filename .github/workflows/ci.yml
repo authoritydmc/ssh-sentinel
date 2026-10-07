@@ -48,6 +48,13 @@ jobs:
       - run: cargo build -p ssh-sentinel
       - run: chmod +x scripts/smoke-agent.sh && AGENT_BIN=target/release/ssh-sentinel-agent CENTRAL_BIN=target/debug/ssh-sentinel bash scripts/smoke-agent.sh
 
+  windows-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check -p ssh-sentinel -p ssh-sentinel-agent
+
   smoke-central:
     runs-on: ubuntu-latest
     steps:

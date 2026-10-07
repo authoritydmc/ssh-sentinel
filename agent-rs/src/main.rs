@@ -5,8 +5,26 @@
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::MetadataExt;
 use std::time::Duration;
+
+/// Stable file identity across rotation. Inode on Unix, mtime nanos on
+/// Windows (std has no stable file index there). A mismatch reships
+/// from zero, which is always safe.
+fn file_id(meta: &fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        meta.modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    }
+}
 
 fn env(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
@@ -55,7 +73,7 @@ fn read_new(log: &str, state: (Option<u64>, u64)) -> (Vec<String>, (Option<u64>,
             return (vec![], state);
         }
     };
-    let ino = meta.ino();
+    let ino = file_id(&meta);
     let len = meta.len();
     let mut off = if state.0 == Some(ino) { state.1 } else { 0 };
     if off > len {
