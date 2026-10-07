@@ -5,13 +5,12 @@ RUN apk add --no-cache musl-dev gcc cmake perl
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY agent-rs/Cargo.toml agent-rs/
+COPY central-rs/Cargo.toml central-rs/
 COPY tools/make-icons/Cargo.toml tools/make-icons/
-RUN mkdir -p agent-rs/src tools/make-icons/src \
+RUN mkdir -p agent-rs/src \
   && echo 'fn main() {}' > agent-rs/src/main.rs \
-  && echo 'fn main() {}' > tools/make-icons/src/main.rs \
   && cargo build --release -p ssh-sentinel-agent || true
 COPY agent-rs/ agent-rs/
-COPY tools/ tools/
 # COPY keeps old mtimes, so cargo would call the dummy build fresh.
 # Touch sources first to force a real rebuild.
 RUN find agent-rs/src -exec touch {} + \
