@@ -61,6 +61,9 @@ sleep 4
 TOTAL2=$(curl -s --max-time 10 "$BASE/api/summary?host=smoke-host" | jq -r .total)
 [ "${TOTAL2:-0}" -ge 5 ] || { echo "[FAIL] rotation: expected >=5, got $TOTAL2"; exit 1; }
 echo "[ OK ] rotation: total=$TOTAL2"
+ONLINE=$(curl -s --max-time 10 "$BASE/api/hosts" | jq -r '.[] | select(.id=="smoke-host") | .online')
+[ "$ONLINE" = "true" ] || { echo "[FAIL] pushing agent not online"; exit 1; }
+echo "[ OK ] agent online in fleet"
 
 jq -e '.ino and .offset' "$STATE" >/dev/null
 echo "[ OK ] state file present"
