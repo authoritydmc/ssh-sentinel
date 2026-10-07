@@ -13,6 +13,7 @@ const WorldMap = lazy(() => import('./components/charts').then(m => ({ default: 
 import { Badge, Card, Empty, MetricCard, Skeleton } from './components/ui';
 const AttackerModal = lazy(() => import('./components/AttackerModal'));
 const VersionModal = lazy(() => import('./components/VersionModal'));
+import SignIn from './components/SignIn';
 import { eventTone, } from './components/ui';
 import { REPO_URL, TZ, fetchAuth, fetchSelf, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type SelfInfo, type Summary } from './lib/api';
 import { MaskProvider, maskHost, maskIp, maskLine, maskLoginIp, maskUser, useMask } from './components/Mask';
@@ -198,16 +199,7 @@ function Shell() {
               <button onClick={() => setSelfHide(true)} className="ml-auto rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white ring-1 ring-inset ring-white/10 hover:bg-white/10">Dismiss</button>
             </div>
           )}
-          {err && err.includes('401') && (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#d29922]/50 bg-[#d29922]/10 p-3 text-sm text-[#e8b93e]">
-              <ShieldAlert size={15} />
-              <span>Login required — {auth?.login === 'forward' ? 'your SSO proxy must pass X-Forwarded-User.' : auth?.login === 'oidc' ? 'sign in with your identity provider.' : 'sign in with the browser prompt (local login), then reload.'}</span>
-              {auth?.login === 'oidc' && (
-                <button onClick={() => { window.location.href = 'oidc/login'; }} className="rounded-lg bg-[#58a6ff]/20 px-2.5 py-1 text-xs font-medium text-white ring-1 ring-inset ring-[#58a6ff]/50 hover:bg-[#58a6ff]/30">Sign in with SSO</button>
-              )}
-              <button onClick={() => window.location.reload()} className="ml-auto rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white ring-1 ring-inset ring-white/10 hover:bg-white/10">Reload</button>
-            </div>
-          )}
+          {err && err.includes('401') && <SignIn auth={auth} onRetry={() => window.location.reload()} />}
           {err && !err.includes('401') && <div className="rounded-xl border border-[#f85149]/50 bg-[#f85149]/10 p-3 text-sm text-[#ff9d97]">Backend unreachable: {err}</div>}
           {auth?.setup_needed && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#d29922]/50 bg-[#d29922]/10 p-3 text-sm text-[#e8b93e]">

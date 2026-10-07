@@ -33,3 +33,15 @@ jobs:
       - run: python3 -m compileall -q backend/server.py agent/agent.py demo/gen_auth_log.py
       - run: python3 demo/gen_auth_log.py && test -s demo/auth.log.sample
       - run: python3 scripts/selftest_oidc.py
+
+  rust-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --manifest-path agent-rs/Cargo.toml
+      - run: ls -l agent-rs/target/release/ssh-sentinel-agent
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: chmod +x scripts/parity-agent.sh && AGENT_BIN=agent-rs/target/release/ssh-sentinel-agent bash scripts/parity-agent.sh
