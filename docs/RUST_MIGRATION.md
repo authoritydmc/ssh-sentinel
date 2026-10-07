@@ -83,8 +83,20 @@ Python is gone from code, image, and CI (only release history mentions it).
 - Equivalence was proven before the swap (Python versus Rust diff, all green).
 - Post-swap safety comes from `cargo test` plus `smoke-central.sh` in CI.
 
-## 7. New numbers after the swap
+## 7. Post-swap numbers (v0.7.1, measured in CI)
 
-Read the `footprint` job summary on `master` after merge.
-It prints the Rust image size plus RSS plus CPU.
-Compare with the 56.4 MB plus 22.2 MiB baseline above.
+| Metric | Python era | Rust now |
+| ------ | ---------- | -------- |
+| Central image, local | 56.4 MB | 94.6 MB |
+| Central image, Hub compressed | about 21 MB per arch | about 36 MB per arch |
+| Central RSS, idle | 22.2 MiB | 1.85 MiB |
+| Central CPU, idle | 0.02% | 0.00% |
+| Standalone agent image | n/a (shared image) | 3.3 MB on `scratch` |
+
+Read it plainly. The image grew. Debian plus certs cost more
+than Alpine plus Python. Runtime RAM fell 12x. The agent
+image is tiny. RAM wins. Image size does not.
+
+To shrink the image next: replace `debian-slim` with a smaller
+base that still ships `getent` for rDNS, or drop the PTR lookup.
+That choice is open. It needs its own test round.
