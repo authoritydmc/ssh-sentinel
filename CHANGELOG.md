@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-07
+
 ### Added
 - Log source + retention (issue #26): `LOG_SOURCE=file|journald` (journald reads `journalctl _COMM=sshd -o short-iso`), `RETENTION_DAYS` prunes stored host lines older than N days on push.
 - Attackers UX (issue #27): ASN column + CSV export on the Attackers view; search filter already present; IPv6 fully supported in parse/mask/filter.
