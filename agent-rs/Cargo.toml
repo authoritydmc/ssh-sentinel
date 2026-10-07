@@ -1,9 +1,16 @@
 [package]
 name = "ssh-sentinel-agent"
-version = "0.1.0"
-edition = "2021"
-description = "SSH Sentinel log shipper in Rust. Same protocol as agent-rs."
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "SSH Sentinel log shipper. Tails the auth log and pushes to central."
 
 [[bin]]
 name = "ssh-sentinel-agent"

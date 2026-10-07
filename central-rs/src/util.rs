@@ -1,6 +1,6 @@
 //! Small helpers: env, CSV sets, IP class, masks, flags, time.
 //!
-//! IP ranges mirror CPython `ipaddress` for all real-world cases.
+//! IP ranges for all real-world cases.
 //! Exotic documentation ranges are treated as non-public on purpose.
 //! That direction is fail-closed: odd IPs never enter lists or bans.
 

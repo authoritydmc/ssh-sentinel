@@ -27,7 +27,7 @@ description: Write pull request descriptions in ASD-STE100 Simplified Technical 
 
 ## Verification
 
-- [ ] <check + result, e.g. `scripts/selftest_oidc.py` 6/6 pass>
+- [ ] <check + result, e.g. `cargo test -p ssh-sentinel` 12/12 pass>
 - [ ] CI runs linked: ci + Docker Image CI-PROD master are green
 
 ## Tracker

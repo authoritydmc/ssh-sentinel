@@ -67,7 +67,7 @@ services:
       # Production: live host log. Demo profile overrides with the sample file.
       - /var/log/auth.log:/var/log/auth.log:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8079/healthz | grep -q ok"]
+      test: ["CMD", "/srv/ssh-sentinel", "--healthcheck", "--port", "${PORT:-8079}"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,5 +1,5 @@
 //! Enrichment: geo (ip-api), RDAP, rDNS, abuse score, recon.
-//! In-memory cache plus best-effort /tmp file persistence like Python.
+//! In-memory cache plus best-effort /tmp file persistence.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -171,7 +171,7 @@ pub fn recon_peek(ip: &str) -> (String, i64) {
 }
 
 fn ptr_of(ip: &str) -> String {
-    // getent exists on glibc hosts (Debian/Ubuntu). Empty on failure like Python.
+    // getent exists on glibc hosts (Debian/Ubuntu). Empty string on failure.
     match std::process::Command::new("getent").arg("hosts").arg(ip).output() {
         Ok(o) if o.status.success() => {
             let t = String::from_utf8_lossy(&o.stdout);
@@ -233,7 +233,7 @@ pub fn ip_detail(ip: &str) -> serde_json::Value {
 }
 
 fn short_kind(e: &str) -> String {
-    // Mirror Python type(e).__name__: map transport text to short names.
+    // Map transport text to short error names.
     if e.contains("status") || e.contains("Status") {
         "HTTPError".to_string()
     } else {

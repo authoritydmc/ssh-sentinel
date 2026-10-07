@@ -37,8 +37,8 @@ SSH Sentinel is designed to run on a **private tailnet or localhost**:
   `OIDC_ISSUER` with RS256 ID-token verify (issuer, audience, expiry,
   nonce), state/nonce anti-replay, server-side sessions (random token in
   HttpOnly cookie, `OIDC_SESSION_TTL`), optional `AUTH_ALLOWED_USERS`.
-  RS256 check is stdlib-only and covered by `scripts/selftest_oidc.py`
-  (RFC 7515 vector); set `OIDC_COOKIE_SECURE=1` on direct HTTPS;
+  RS256 check is covered by the Rust RFC 7515 vector test
+  (`cargo test -p ssh-sentinel crypto`); set `OIDC_COOKIE_SECURE=1` on direct HTTPS;
   `none` = explicit open mode for private networks/demo only. `/healthz` and
   `/api/auth` stay open; agent push keeps its own per-host Bearer tokens.
 - **`/api/abusers`** exposes attacker IPs only (hits, first/last, attempted

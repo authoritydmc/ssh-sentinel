@@ -20,23 +20,23 @@ if ! grep -q '^## \[Unreleased\]' CHANGELOG.md; then
 fi
 TODAY=$(date +%F)
 
-# 1) VERSION file
+# 1) VERSION file plus workspace crate version (single source of truth)
 printf '%s\n' "$VER" > VERSION
+sed -i "s/^version = \"[0-9][0-9.]*\"$/version = \"$VER\"/" Cargo.toml
+grep -q "^version = \"$VER\"$" Cargo.toml || { echo "[FAIL] Cargo.toml version bump failed." >&2; exit 1; }
 
 # 2) CHANGELOG: move the Unreleased body under a versioned heading,
 # keep a fresh Unreleased stub (file starts with a title preamble).
-python3 - "$VER" "$TODAY" <<'PY'
-import sys
-ver, today = sys.argv[1], sys.argv[2]
-src = open("CHANGELOG.md").read()
-old = "## [Unreleased]\n"
-assert old in src, "CHANGELOG lacks an '## [Unreleased]' section"
-head, rest = src.split(old, 1)
-open("CHANGELOG.md", "w").write(
-    head + "## [Unreleased]\n\n## [%s] - %s\n%s" % (ver, today, rest))
-PY
+awk -v ver="$VER" -v today="$TODAY" '
+  /^## \[Unreleased\]$/ && !done { print; print ""; print "## [" ver "] - " today; done=1; next }
+  { print }
+' CHANGELOG.md > CHANGELOG.md.new && mv CHANGELOG.md.new CHANGELOG.md
+grep -q "^## \[$VER\] - $TODAY$" CHANGELOG.md || { echo "[FAIL] CHANGELOG rewrite failed." >&2; exit 1; }
 
-git add VERSION CHANGELOG.md
+# 3) Refresh the workspace lockfile for the new version (offline, no network).
+cargo metadata --format-version 1 --no-deps >/dev/null
+
+git add VERSION CHANGELOG.md Cargo.toml Cargo.lock
 git commit -m "chore(release): v$VER"
 git tag -a "v$VER" -m "v$VER"
 git push origin master "v$VER"

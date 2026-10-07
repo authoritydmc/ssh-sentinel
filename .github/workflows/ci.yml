@@ -28,8 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path central-rs/Cargo.toml
-      - run: cargo test --manifest-path agent-rs/Cargo.toml
+      - run: cargo test --workspace
+      - run: cargo publish --dry-run -p ssh-sentinel
+      - run: cargo publish --dry-run -p ssh-sentinel-agent
       - run: test -s demo/auth.log.sample
 
   rust-agent:
@@ -40,23 +41,17 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - run: cargo build --release --manifest-path agent-rs/Cargo.toml
-      - run: ls -l agent-rs/target/release/ssh-sentinel-agent
-      - run: cargo build --release --target x86_64-unknown-linux-musl --manifest-path agent-rs/Cargo.toml
-      - run: ls -l agent-rs/target/x86_64-unknown-linux-musl/release/ssh-sentinel-agent
-      - run: cargo build --manifest-path central-rs/Cargo.toml
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: chmod +x scripts/parity-agent.sh && AGENT_BIN=agent-rs/target/release/ssh-sentinel-agent CENTRAL_BIN=central-rs/target/debug/ssh-sentinel bash scripts/parity-agent.sh
+      - run: cargo build --release -p ssh-sentinel-agent
+      - run: ls -l target/release/ssh-sentinel-agent
+      - run: cargo build --release --target x86_64-unknown-linux-musl -p ssh-sentinel-agent
+      - run: ls -l target/x86_64-unknown-linux-musl/release/ssh-sentinel-agent
+      - run: cargo build -p ssh-sentinel
+      - run: chmod +x scripts/smoke-agent.sh && AGENT_BIN=target/release/ssh-sentinel-agent CENTRAL_BIN=target/debug/ssh-sentinel bash scripts/smoke-agent.sh
 
   smoke-central:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: cargo build --manifest-path central-rs/Cargo.toml
-      - run: chmod +x scripts/smoke-central.sh && RSBIN=central-rs/target/debug/ssh-sentinel bash scripts/smoke-central.sh
+      - run: cargo build -p ssh-sentinel
+      - run: chmod +x scripts/smoke-central.sh && RSBIN=target/debug/ssh-sentinel bash scripts/smoke-central.sh

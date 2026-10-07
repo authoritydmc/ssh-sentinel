@@ -6,18 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- Rust runtime for central plus agent. Python is gone from the image.
+- Rust runtime for central plus agent. No Python in code, image, or CI.
   `central-rs` serves the API plus UI. `agent-rs` ships logs.
   Same API, same DB schema, same CLI (`gentoken`, `genhash`, `scrub`).
-- Static agent binary in GitHub Releases. `agent/install.sh` fetches it.
-  No build tools needed on member servers.
-- CI covers the swap: `cargo test`, agent parity, central smoke,
+- Cargo workspace at the repo root. Crates carry repo version plus metadata.
+  Install with `cargo install --git https://github.com/authoritydmc/ssh-sentinel`.
+  Crates.io publish is ready (`cargo publish --dry-run` runs in CI).
+- Native release binaries for Linux, Windows, and macOS on every tag.
+  `agent/install.sh` fetches the matching static Linux binary.
+- CI covers the swap: `cargo test`, agent smoke, central smoke,
   musl static build, standalone agent image build.
 - `PORT` env selects the listen port (default 8079).
 - Full sign-in panel: mode-aware help plus always-visible SSO button in `oidc` mode.
-- Rust agent pilot (`agent-rs/`): same push protocol as Python, static musl image, parity-tested in CI.
-- Rust central (`central-rs/`): full endpoint parity with Python, unit-tested (RFC 7515 vector included).
-- CI parity job: boots Python plus Rust centrals on the demo log and diffs all deterministic fields.
+- Rust agent (`agent-rs/`): static musl image, smoke-tested in CI.
+- Rust central (`central-rs/`): unit-tested (RFC 7515 vector included).
 - CI footprint job: reports central image size plus RSS plus CPU on every run. See `docs/RUST_MIGRATION.md`.
 - Admin can edit bans and reports from UI. New `GET plus POST /api/admin/config` stores overrides in SQLite. Env var set locks a field. No restart is needed.
 - Admin can edit whitelist, trusted IPs and users, self IPs, abusers bar, and public feed from UI. Same env-lock rule applies.
@@ -27,7 +29,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - Ban list shows created plus remaining plus firewall state. Expires text explains monitor-only mode.
-- Bytecode never ships: `.gitignore` plus `.dockerignore` cover `__pycache__`, `*.pyc`, test caches, and local DBs. Image sets `PYTHONDONTWRITEBYTECODE=1` plus `PYTHONUNBUFFERED=1`.
+- Bytecode never ships: `.gitignore` plus `.dockerignore` cover caches, local DBs, and `target/`. LF endings enforced via `.gitattributes`.
 
 ## [0.6.0] - 2026-10-07
 

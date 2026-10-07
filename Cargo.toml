@@ -1,0 +1,15 @@
+[workspace]
+members = ["central-rs", "agent-rs", "tools/make-icons"]
+resolver = "2"
+
+[workspace.package]
+version = "0.6.0"
+edition = "2024"
+authors = ["authoritydmc"]
+license = "MIT"
+repository = "https://github.com/authoritydmc/ssh-sentinel"
+homepage = "https://github.com/authoritydmc/ssh-sentinel"
+documentation = "https://github.com/authoritydmc/ssh-sentinel/blob/master/README.md"
+rust-version = "1.85"
+keywords = ["ssh", "security", "monitoring", "soc", "fail2ban"]
+categories = ["command-line-utilities"]

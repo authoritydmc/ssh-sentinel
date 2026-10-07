@@ -9,11 +9,17 @@ set -euo pipefail
 AGENT_ID="${AGENT_ID:-$(hostname -s)}"
 REPO="${REPO:-authoritydmc/ssh-sentinel}"
 VERSION="${AGENT_VERSION:-$(cat "$(dirname "$0")/../VERSION" 2>/dev/null || echo 0.6.0)}"
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "this installer covers Linux systemd only." >&2
+  echo "macOS and Windows: download the matching asset from" >&2
+  echo "https://github.com/${REPO}/releases and run it directly." >&2
+  exit 1
+fi
 ARCH="$(uname -m)"
 case "$ARCH" in
   x86_64) TARGET="x86_64-unknown-linux-musl" ;;
-  aarch64) TARGET="aarch64-unknown-linux-musl" ;;
-  *) echo "unsupported arch: $ARCH (want x86_64 or aarch64)"; exit 1 ;;
+  aarch64|arm64) TARGET="aarch64-unknown-linux-musl" ;;
+  *) echo "unsupported arch: $ARCH (want x86_64 or arm64)" >&2; exit 1 ;;
 esac
 
 TMP="$(mktemp -d)"

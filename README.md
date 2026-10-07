@@ -116,6 +116,20 @@ docker exec -it ssh-sentinel /srv/ssh-sentinel genhash
 # -> AUTH_PASS_HASH=pbkdf2-sha256$200000$...   (paste into .env, compose up -d)
 ```
 
+### Option C — native binary (no Docker)
+
+```bash
+# From source (needs a Rust toolchain):
+cargo install --git https://github.com/authoritydmc/ssh-sentinel ssh-sentinel
+cargo install --git https://github.com/authoritydmc/ssh-sentinel ssh-sentinel-agent
+# From crates.io once published: cargo install ssh-sentinel
+
+# Or fetch a release binary (Linux, Windows, macOS assets on every tag):
+# https://github.com/authoritydmc/ssh-sentinel/releases
+AUTH_LOG=/var/log/auth.log DATA_DIR=./data ./ssh-sentinel
+```
+```
+
 Behind Authentik + Traefik instead (same ForwardAuth pattern as Dozzle):
 
 ```yaml
@@ -281,9 +295,9 @@ Same origin, no auth for reads (keep behind tailnet/SSO). Agent push requires be
 Examples:
 
 ```bash
-curl -s 'http://localhost:8079/api/summary?host=all' | python3 -m json.tool | head -n 40
+curl -s 'http://localhost:8079/api/summary?host=all' | jq | head -n 40
 curl -s 'http://localhost:8079/api/tail?q=Accepted&n=5'
-curl -s 'http://localhost:8079/api/ipinfo?ip=77.91.71.90' | python3 -m json.tool | head -n 40
+curl -s 'http://localhost:8079/api/ipinfo?ip=77.91.71.90' | jq | head -n 40
 curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 ```
 
@@ -335,7 +349,7 @@ Files:
 | `agent-rs/` | Rust shipper pilot, same protocol, static image (see `agent-rs/README.md`) |
 | `demo/` | sample log + generator for UI work without real attacks |
 | `Dockerfile` | node build + cargo build → debian-slim runtime (no Python) |
-| `.github/workflows/` | `docker.yml` (GHCR + Docker Hub publish), `ci.yml` (frontend lint/build + python compile) |
+| `.github/workflows/` | `docker.yml` (GHCR + Docker Hub publish), `ci.yml` (frontend lint/build + cargo test) |
 
 ## 🔒 Security
 
@@ -350,7 +364,7 @@ Read [`SECURITY.md`](SECURITY.md) before exposing anything.
 - `/api/abusers` (+ `/abusers` page) is safe-fields-only by construction (no accepted logins, hostnames, internal/self IPs, or raw lines) and lists **repeat offenders only**: ≥5 fails, risk-scored (attempts, user breadth, recency, optional AbuseIPDB confidence), auto-excluded on any successful login. Stays behind the login gate unless `ABUSERS_PUBLIC=1` — still rate-limited (`ABUSERS_RPM`, `429` + `Retry-After`).
 - `WHITELIST_IPS` removes owner/admin IPs from every attacker list (abusers, top table, map). `/api/self` tells each visitor their own list status.
 - `.env` and `data/` are git-ignored; only `.env.example` ships. Tokens are runtime-minted via `secrets.token_urlsafe(32)`.
-- Demo log is 100% synthetic (`demo/gen_auth_log.py`, seeded) — safe to share screenshots.
+- Demo log is 100% synthetic (seeded sample) — safe to share screenshots.
 
 ## 🛠️ Development
 
@@ -381,8 +395,12 @@ Footprint is tracked in CI (image size plus RSS plus CPU per run). Rust plans li
 
 Images publish on every `master` push + tags via GitHub Actions:
 
-- `ghcr.io/authoritydmc/ssh-sentinel:latest` (+ `:sha-<commit>`, semver on tags)
+- `ghcr.io/authoritydmc/ssh-sentinel:latest` (+ `:prod-<commit>`, semver on tags)
 - `rajlabs/ssh-sentinel:latest` (same tags, requires `DOCKER_HUB_USERNAME` + `DOCKER_HUB_ACCESS_TOKEN` secrets)
+
+Tags are always semver (`vX.Y.Z` via `scripts/release.sh`). No date tags.
+Native binaries (`ssh-sentinel`, `ssh-sentinel-agent` for Linux,
+Windows, macOS) attach to every GitHub Release automatically.
 
 ## 📝 Changelog
 

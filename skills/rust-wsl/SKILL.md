@@ -26,15 +26,15 @@ Prefix every Rust command with the full cargo path:
 
 ```bash
 wsl ~/.cargo/bin/cargo --version
-wsl ~/.cargo/bin/cargo check --manifest-path /mnt/d/coding/ssh-sentinel/agent-rs/Cargo.toml
-wsl ~/.cargo/bin/cargo test --manifest-path /mnt/d/coding/ssh-sentinel/agent-rs/Cargo.toml
-wsl ~/.cargo/bin/cargo build --release --manifest-path /mnt/d/coding/ssh-sentinel/central-rs/Cargo.toml
+wsl bash -c "cd /mnt/d/coding/ssh-sentinel && ~/.cargo/bin/cargo check --workspace"
+wsl bash -c "cd /mnt/d/coding/ssh-sentinel && ~/.cargo/bin/cargo test --workspace"
+wsl bash -c "cd /mnt/d/coding/ssh-sentinel && ~/.cargo/bin/cargo build --release --workspace"
 ```
 
-Run built binaries from WSL too:
+Run built binaries from WSL too (workspace target dir at repo root):
 
 ```bash
-wsl /mnt/d/coding/ssh-sentinel/agent-rs/target/debug/ssh-sentinel-agent
+wsl /mnt/d/coding/ssh-sentinel/target/debug/ssh-sentinel-agent
 ```
 
 ## Notes

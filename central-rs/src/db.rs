@@ -1,4 +1,4 @@
-//! SQLite store. Same schema as central-rs. Logs stay source of truth.
+//! SQLite store. Tables: ip_stats, bans, reports, activity, kv.
 
 use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;

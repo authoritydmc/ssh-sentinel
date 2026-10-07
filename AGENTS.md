@@ -37,7 +37,7 @@ Read this file before you change code. Obey all rules in it.
 2. `cd frontend && npm run lint && npm run build`
 3. For backend behavior changes: run the server with the demo log and test
    each mode you touched (`none`, `local`, `forward`, `oidc`) plus `/api/abusers`.
-   Smoke script: `RSBIN=central-rs/target/debug/ssh-sentinel bash scripts/smoke-central.sh`.
+   Smoke script: `RSBIN=target/debug/ssh-sentinel bash scripts/smoke-central.sh`.
 4. Commit with a conventional message: `feat|fix|chore|docs(scope): text`.
 5. Open a PR to `master` and write the description with
    `skills/pr-writing/SKILL.md`.

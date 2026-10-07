@@ -22,7 +22,7 @@ before you claim a release is done.
 
 `scripts/ai-install.sh` prepares the machine and the repo:
 
-1. Checks for `git`, `docker`, `python3` (warns, does not install).
+1. Checks for `git`, `docker`, `cargo` (warns, does not install).
 2. Clones the repo (or updates it if present).
 3. Runs `scripts/install-hooks.sh` (commit-msg, pre-commit, pre-push).
 4. Creates `.env` from `.env.example` when missing.

@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 // Counter is not std; small local multiset.
-// Sequence numbers keep first-seen order for ties, like Python Counter.
+// Sequence numbers keep first-seen order for ties.
 #[derive(Default)]
 struct Bag<K: Eq + std::hash::Hash> {
     m: HashMap<K, (i64, usize)>,
@@ -179,7 +179,7 @@ pub fn summary(ctx: &Ctx, host: Option<&str>) -> serde_json::Value {
     let now_ms = crate::clock_ms();
     let base_hour = L::hour_ms(now_ms);
     let mut tl = vec![];
-    // Ascending hours: now-47h .. now, like Python range(47, -1, -1).
+    // Ascending hours: now-47h .. now.
     for i in 0..48 {
         let h = base_hour - (47 - i) as i64 * 3_600_000;
         tl.push(serde_json::json!([h, hours.get(&h).copied().unwrap_or(0), ok_hours.get(&h).copied().unwrap_or(0)]));
@@ -209,7 +209,7 @@ pub fn summary(ctx: &Ctx, host: Option<&str>) -> serde_json::Value {
 
 fn recon_cache(ip: &str) -> (String, i64) {
     // Cheap peek without network: geo module owns recon cache; expose via ip_detail? No.
-    // Python reads _cache recon entry if present. We expose a getter in geo.
+    // Recon badge reads the cached recon entry when present.
     crate::geo::recon_peek(ip)
 }
 
@@ -304,7 +304,7 @@ pub fn abusers(ctx: &Ctx, host: Option<&str>) -> Vec<serde_json::Value> {
     if let Ok(mut c) = abusers_cell().lock() {
         *c = (now_t, h, entries.clone());
     }
-    // sync ip_stats like Python
+    // Mirror the stats row into ip_stats.
     sync_ip_stats(ctx.db, &entries);
     entries
 }
@@ -746,7 +746,7 @@ pub fn store_pushed_lines(ctx: &Ctx, host: &str, lines: &[String]) {
             let fresh: Vec<String> = all.iter().filter(|ln| {
                 L::parse_ts_ms(ln, &now_dt).map(|ms| ms >= cutoff_ms).unwrap_or(true)
             }).cloned().collect();
-            // Python keeps fresh only when >=1000 lines, else last 1000.
+            // Keep fresh lines only when >=1000 lines, else the last 1000.
             all = if fresh.len() >= 1000 { fresh } else { all.into_iter().rev().take(1000).collect::<Vec<_>>().into_iter().rev().collect() };
         }
         if all.len() > ctx.cfg.max_lines {

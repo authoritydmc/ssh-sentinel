@@ -8,21 +8,23 @@ RUN npm run build
 
 FROM rust:1-bookworm AS rust
 WORKDIR /build
-COPY central-rs/Cargo.toml central-rs/Cargo.lock central-rs/
-COPY agent-rs/Cargo.toml agent-rs/Cargo.lock agent-rs/
-RUN mkdir -p central-rs/src agent-rs/src \
+COPY Cargo.toml Cargo.lock ./
+COPY central-rs/Cargo.toml central-rs/
+COPY agent-rs/Cargo.toml agent-rs/
+COPY tools/make-icons/Cargo.toml tools/make-icons/
+RUN mkdir -p central-rs/src agent-rs/src tools/make-icons/src \
   && echo 'fn main() {}' > central-rs/src/main.rs \
   && echo 'fn main() {}' > agent-rs/src/main.rs \
-  && cargo build --release --manifest-path central-rs/Cargo.toml \
-  && cargo build --release --manifest-path agent-rs/Cargo.toml
+  && echo 'fn main() {}' > tools/make-icons/src/main.rs \
+  && cargo build --release -p ssh-sentinel -p ssh-sentinel-agent
 COPY central-rs/ central-rs/
 COPY agent-rs/ agent-rs/
+COPY tools/ tools/
 # COPY keeps old mtimes, so cargo would call the dummy build fresh.
 # Touch sources first to force a real rebuild.
 RUN find central-rs/src agent-rs/src -exec touch {} + \
-  && cargo build --release --manifest-path central-rs/Cargo.toml \
-  && cargo build --release --manifest-path agent-rs/Cargo.toml \
-  && ls -l central-rs/target/release/ssh-sentinel agent-rs/target/release/ssh-sentinel-agent
+  && cargo build --release -p ssh-sentinel -p ssh-sentinel-agent \
+  && ls -l target/release/ssh-sentinel target/release/ssh-sentinel-agent
 
 FROM debian:bookworm-slim
 ARG APP_VERSION=dev
@@ -31,11 +33,11 @@ LABEL org.opencontainers.image.title="ssh-sentinel" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}"
 ENV APP_VERSION=${APP_VERSION} GIT_COMMIT=${GIT_COMMIT}
-RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /srv
-COPY --from=rust /build/central-rs/target/release/ssh-sentinel ./ssh-sentinel
-COPY --from=rust /build/agent-rs/target/release/ssh-sentinel-agent ./ssh-sentinel-agent
+COPY --from=rust /build/target/release/ssh-sentinel ./ssh-sentinel
+COPY --from=rust /build/target/release/ssh-sentinel-agent ./ssh-sentinel-agent
 COPY docker/entrypoint.sh ./entrypoint.sh
 COPY VERSION ./VERSION
 COPY CHANGELOG.md ./CHANGELOG.md
