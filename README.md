@@ -39,10 +39,20 @@ configures, deploys, and verifies. It obeys [`AGENTS.md`](AGENTS.md).
 
 ## 📸 Gallery
 
-Screenshots are omitted on purpose. Real dashboards leak usernames, IPs,
-and host names. Use the header **mask** toggle for screenshot-safe views.
-It hides IPs, usernames, host names, and session lines on every page.
-The choice persists per browser.
+All shots use the header **mask** toggle. It hides IPs, usernames,
+host names, and session lines on every page. Only attacker data shows:
+attacker IPs, geo, and tried users. The choice persists per browser.
+
+| View | Shot |
+| ---- | ---- |
+| Overview, masked fleet metrics | ![overview](docs/screenshots/overview-masked.png) |
+| World map plus top regions | ![map](docs/screenshots/world-map-regions.png) |
+| Attackers table, masked | ![attackers](docs/screenshots/attackers-masked.png) |
+| Attacker intel plus recon | ![intel](docs/screenshots/intel-modal-recon.png) |
+| Admin bans | ![bans](docs/screenshots/admin-bans.png) |
+| Attacker intel, full detail | ![attacker](docs/screenshots/intel-modal-attacker.png) |
+| Attackers plus masked logins | ![logins](docs/screenshots/attackers-logins-masked.png) |
+| Intel loading state | ![loading](docs/screenshots/intel-modal-loading.png) |
 
 ## 🎯 Use cases
 
