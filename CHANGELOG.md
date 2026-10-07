@@ -25,6 +25,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Rust agent (`agent-rs/`): static musl image, smoke-tested in CI.
 - Rust central (`central-rs/`): unit-tested (RFC 7515 vector included).
 - CI footprint job: reports central image size plus RSS plus CPU on every run. See `docs/RUST_MIGRATION.md`.
+- Docker smoke test asserts UI serving (shell, bundle, SPA fallback) and
+  captures a headless dashboard screenshot as a CI artifact.
 - Admin can edit bans and reports from UI. New `GET plus POST /api/admin/config` stores overrides in SQLite. Env var set locks a field. No restart is needed.
 - Admin can edit whitelist, trusted IPs and users, self IPs, abusers bar, and public feed from UI. Same env-lock rule applies.
 - Fail2ban guide `docs/FAIL2BAN.md` with same-host push plus banlist pull plus verify steps. Linked from Admin, README, and `.env.example`.

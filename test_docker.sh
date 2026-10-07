@@ -38,6 +38,18 @@ docker logs "$CONTAINER" 2>&1 | tail -n 5 || true
 echo "[3/7] Health + API checks (incl. public abusers feed)..."
 curl -s --max-time 20 -f "http://localhost:$HOST_PORT/healthz" | grep -q ok
 echo "[ OK ] /healthz -> ok"
+curl -s --max-time 20 -f -D /tmp/smoke-headers.txt "http://localhost:$HOST_PORT/" -o /tmp/smoke-index.html
+grep -q 'text/html' /tmp/smoke-headers.txt
+grep -q '/assets/' /tmp/smoke-index.html
+echo "[ OK ] / serves the UI shell"
+ASSET=$(grep -o '/assets/[^"]*\.js' /tmp/smoke-index.html | head -1)
+[ -n "$ASSET" ] || { echo "[FAIL] no JS asset in UI shell"; exit 1; }
+curl -s --max-time 20 -f -D /tmp/smoke-js-headers.txt "http://localhost:$HOST_PORT$ASSET" -o /tmp/smoke-app.js
+grep -q 'javascript' /tmp/smoke-js-headers.txt
+[ "$(wc -c < /tmp/smoke-app.js)" -gt 50000 ] || { echo "[FAIL] JS bundle too small"; exit 1; }
+echo "[ OK ] JS bundle serves ($ASSET)"
+curl -s --max-time 20 -f "http://localhost:$HOST_PORT/attackers" | grep -q '/assets/'
+echo "[ OK ] SPA fallback serves the shell"
 is_global() {
   case "$1" in
     10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*|127.*|169.254.*|0.*|224.*|24[0-9].*|25*|\
@@ -172,5 +184,19 @@ curl -s --max-time 20 -f -X POST "http://localhost:$SHOST_PORT/api/admin/unban" 
   -d "{\"ip\":\"$IP\"}" | grep -q '"ok": *true'
 echo "[ OK ] unban $IP"
 docker rm -f "$SCONTAINER" >/dev/null 2>&1 || true
+
+echo "[8/7] UI render (headless screenshot)..."
+CHROME=""
+for c in google-chrome chromium chromium-browser; do
+  if command -v "$c" >/dev/null 2>&1; then CHROME="$c"; break; fi
+done
+[ -n "$CHROME" ] || { echo "[FAIL] no headless browser found"; exit 1; }
+SHOT="${SHOT_PATH:-/tmp/ui-shot.png}"
+"$CHROME" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+  --window-size=1280,900 --virtual-time-budget=10000 \
+  --screenshot="$SHOT" "http://localhost:$HOST_PORT/" >/dev/null 2>&1
+[ -s "$SHOT" ] || { echo "[FAIL] empty screenshot"; exit 1; }
+[ "$(wc -c < "$SHOT")" -gt 20000 ] || { echo "[FAIL] screenshot too small, UI likely blank"; exit 1; }
+echo "[ OK ] dashboard renders ($SHOT)"
 
 echo "Smoke test PASSED."
