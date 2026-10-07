@@ -1,14 +1,17 @@
 # <img src="frontend/public/logo.svg" width="40" align="left" alt="SSH Sentinel logo"> SSH Sentinel — multi-server SSH attack intel (SOC dashboard)
 
-Central React dashboard + stdlib-only Python API + lightweight log-shipper agents.
+Central React dashboard + Rust API + lightweight log-shipper agents.
 Modelled on **Beszel** (hub/agent) and **Dozzle** (distributed logs): agents **push**
-over your tailnet, central aggregates. No database, no dependencies at runtime.
+over your tailnet, central aggregates. SQLite holds derived state. Logs stay source of truth.
 
 ![Docker](https://img.shields.io/badge/docker-rajlabs%2Fssh--sentinel-blue?logo=docker)
 ![GHCR](https://img.shields.io/badge/ghcr-ssh--sentinel-blue?logo=github)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Stack](https://img.shields.io/badge/frontend-React19%20%2B%20Tailwind4-58a6ff)
 ![Backend](https://img.shields.io/badge/backend-Rust-f74c00)
+![ci](https://github.com/authoritydmc/ssh-sentinel/actions/workflows/ci.yml/badge.svg)
+![docker](https://github.com/authoritydmc/ssh-sentinel/actions/workflows/docker.yml/badge.svg)
+![release](https://github.com/authoritydmc/ssh-sentinel/actions/workflows/release.yml/badge.svg)
 
 ```
 agent (any server) --tailscale+bearer--> central (main server) --> UI
