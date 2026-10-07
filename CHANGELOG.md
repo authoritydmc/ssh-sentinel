@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-07
+
 ### Added
 - Rust runtime for central plus agent. No Python in code, image, or CI.
   `central-rs` serves the API plus UI. `agent-rs` ships logs.
