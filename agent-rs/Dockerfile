@@ -11,7 +11,7 @@ COPY agent-rs/ ./
 # Touch sources first to force a real rebuild.
 RUN find src -exec touch {} + \
   && cargo build --release \
-  && cp "$(ls target/*/release/ssh-sentinel-agent | head -1)" /agent-bin \
+  && cp "$(find target -name ssh-sentinel-agent -type f | head -1)" /agent-bin \
   && ls -l /agent-bin
 
 FROM scratch
