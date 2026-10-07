@@ -144,6 +144,8 @@ Rules:
 - Risk adds velocity (hits per hour) and repeat-ban signals.
 - Accepted logins still clear an IP from the attacker list.
 - `POST /api/admin/ban` writes `bans`, calls `fail2ban-client`, rewrites `banlist.txt`.
+- `GET plus POST /api/admin/config` edits enforcement from UI. Values live in `kv`. Env set locks a field. No restart is needed.
+- UI covers bans, reports, whitelist, trusted IPs and users, self IPs, and abusers quality bar. Secrets stay env-only. See `docs/FAIL2BAN.md` for blocking.
 - Auto-ban runs each 60 seconds when `BAN_AUTO=1`.
 - It skips self, whitelisted, private, and accepted IPs.
 - Abuse reports send once per `REPORT_THROTTLE_DAYS` per provider.

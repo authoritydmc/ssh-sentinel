@@ -264,7 +264,9 @@ Same origin, no auth for reads (keep behind tailnet/SSO). Agent push requires be
 | `GET` | `/abusers` | — | public leaderboard page (same safe data, no login) — works only with `ABUSERS_PUBLIC=1`, else `404` |
 | `GET` | `/api/self` | — | open self-check: your IP, list status, risk, whitelist state. The UI shows a red banner when your IP is listed ("ask the admin to whitelist you") |
 | `GET` | `/api/admin/status` | — | open setup status: `setup_needed`, ban/report flags. No secrets |
-| `GET` | `/api/admin/bans` | — | active bans: ip, jail, reason, source, expiry (login required) |
+| `GET` | `/api/admin/config` | — | enforcement values plus env lock plus source (login required) |
+| `POST` | `/api/admin/config` | `{ban_*, report_*}` | save enforcement overrides to DB. Env set locks a field. No restart (login required) |
+| `GET` | `/api/admin/bans` | — | active bans: ip, jail, reason, source, created, expiry, firewall state (login required) |
 | `GET` | `/api/banlist` | — | plain-text banned IPs, one per line (login required; same host can read `banlist.txt` directly) |
 | `GET` | `/api/admin/activity` | `?limit=` | latest admin actions: bans, unbans, reports, setups (login required) |
 | `GET` | `/api/admin/reports` | — | abuse-report history per IP and provider (login required) |
@@ -311,6 +313,9 @@ curl -X POST 'http://localhost:8079/api/recon?ip=77.91.71.90'
 | `ABUSERS_RPM` | `60` | central | `/api/abusers` per-client-IP requests/minute (`429` past budget) |
 | `ALERT_WEBHOOK_URL` / `ALERT_WEBHOOK_TOKEN` | `` | central | Login + spike alerts (`login.suspicious`, `spike.bruteforce`); falls back to abuse webhook; test via `POST /api/alerts/test` |
 | `ALERT_ON_SUCCESS` / `ALERT_SPIKE_THRESHOLD` / `ALERT_SPIKE_WINDOW_S` / `ALERT_DEDUPE_S` | `1` / `20` / `300` / `3600` | central | Alert tuning: suspicious logins on, spike bar, window seconds, resend delay |
+| `WHITELIST_IPS` / `TRUSTED_IPS` / `TRUSTED_USERS` | `` | central | UI editable in Admin Settings. Whitelist never lists or bans. Trusted tunes suspicious logins. |
+| `BAN_ENABLED` / `BAN_AUTO` / `BAN_*` | off | central | UI editable in Admin Settings. Env set locks the field. See `docs/FAIL2BAN.md`. |
+| `REPORT_*` / `ABUSERS_MIN_*` / `ABUSERS_PUBLIC` | off | central | UI editable in Admin Settings. Env set locks the field. |
 
 ### n8n alert flow (2 min)
 

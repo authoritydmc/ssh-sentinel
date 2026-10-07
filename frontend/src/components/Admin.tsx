@@ -4,8 +4,10 @@ import {
   fetchActivity,
   fetchAdminStatus,
   fetchBans,
+  fetchEnforcement,
   fetchReports,
   fmtT,
+  postEnforcement,
   postPassword,
   postSetup,
   postUnban,
@@ -91,13 +93,15 @@ function BansTab() {
       {rows.length === 0 && <Empty>No active bans. Ban an IP from the attacker modal.</Empty>}
       {rows.length > 0 && (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[620px] text-sm">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="text-left text-xs text-[#8b98ad]">
                 <th className="pb-2 pr-3 font-medium">IP</th>
                 <th className="pb-2 pr-3 font-medium">Source</th>
                 <th className="pb-2 pr-3 font-medium">Reason</th>
+                <th className="pb-2 pr-3 font-medium">Created</th>
                 <th className="pb-2 pr-3 font-medium">Expires</th>
+                <th className="pb-2 pr-3 font-medium">Block</th>
                 <th className="pb-2 font-medium">Action</th>
               </tr>
             </thead>
@@ -109,7 +113,13 @@ function BansTab() {
                     <Badge tone={b.source === 'auto' ? 'warn' : 'info'}>{b.source}</Badge>
                   </td>
                   <td className="py-1.5 pr-3 text-[#8b98ad]">{b.reason || '—'}</td>
-                  <td className="py-1.5 pr-3 text-xs text-[#8b98ad]">{b.expires ? fmtT(b.expires) : '—'}</td>
+                  <td className="py-1.5 pr-3 text-xs text-[#8b98ad]">{b.created ? fmtT(b.created) : '—'}</td>
+                  <td className="py-1.5 pr-3 text-xs text-[#8b98ad]" title="Ban record becomes inactive at this time. Firewall block needs BAN_ENABLED=1 plus fail2ban.">
+                    {b.expires ? `${fmtT(b.expires)} · ${relT(b.expires)}` : '—'}
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    {b.fail2ban_ok ? <Badge tone="ok">firewall</Badge> : <Badge tone="dim" title="DB plus banlist only. Set BAN_ENABLED=1 with fail2ban to drop packets.">monitor</Badge>}
+                  </td>
                   <td className="py-1.5">
                     <button
                       onClick={() => postUnban(b.ip).then(load).catch((e) => setErr(e.message))}
@@ -124,6 +134,10 @@ function BansTab() {
           </table>
         </div>
       )}
+      <p className="mt-3 text-xs text-[#8b98ad]">
+        Expires means the ban record turns inactive at that time. Sentinel alone never drops packets.
+        Real block needs BAN_ENABLED=1 plus fail2ban on the host. Banned IPs can still show in logs when block is off.
+      </p>
     </Card>
   );
 }
@@ -195,28 +209,127 @@ function ActivityTab() {
 }
 
 function SettingsTab({ status }: { status: AdminStatus }) {
+  const [vals, setVals] = useState<Record<string, string | number | boolean>>({
+    ban_enabled: status.ban_enabled,
+    ban_jail: status.ban_jail,
+    ban_time: status.ban_time ?? 86400,
+    ban_auto: status.ban_auto,
+    ban_threshold: status.ban_threshold,
+    ban_window: status.ban_window,
+    ban_auto_time: status.ban_auto_time ?? 86400,
+    report_enabled: status.report_enabled,
+    report_provider: status.report_provider,
+    report_throttle_days: status.report_throttle_days,
+    report_min_risk: status.report_min_risk ?? 60,
+    report_min_hits: status.report_min_hits ?? 20,
+    whitelist_ips: status.whitelist_ips ?? '',
+    trusted_ips: status.trusted_ips ?? '',
+    trusted_users: status.trusted_users ?? '',
+    self_public_ips: status.self_public_ips ?? '',
+    abusers_min_hits: status.abusers_min_hits ?? 5,
+    abusers_min_score: status.abusers_min_score ?? 25,
+    abusers_public: status.abusers_public ?? false,
+  });
+  const [locked, setLocked] = useState<Record<string, boolean>>(status.enforce_locked ?? {});
+  const [sources, setSources] = useState<Record<string, string>>(status.enforce_sources ?? {});
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    fetchEnforcement().then((c) => {
+      setVals({ ...c.values });
+      setLocked(c.locked);
+      setSources(c.sources);
+    }).catch(() => { /* status values stay */ });
+  }, []);
+  const set = (k: string, v: string | number | boolean) => setVals((p) => ({ ...p, [k]: v }));
+  const save = () => {
+    setSaving(true);
+    setMsg('');
+    postEnforcement(vals)
+      .then((r) => {
+        setVals({ ...r.config.values });
+        setLocked(r.config.locked);
+        setSources(r.config.sources);
+        const n = Object.keys(r.updated || {}).length;
+        const skip = Object.keys(r.skipped || {}).length;
+        setMsg(n ? `Saved ${n} setting${n === 1 ? '' : 's'}. Applies now, no restart.` : skip ? `Skipped: env locked (${Object.keys(r.skipped).join(', ')}).` : 'No change.');
+      })
+      .catch((e) => setMsg(`Failed: ${e.message}`))
+      .finally(() => setSaving(false));
+  };
+  const row = (key: string, label: string, hint: string, input: React.ReactNode) => (
+    <div className="flex flex-col gap-1 rounded-xl bg-black/20 px-3 py-2 ring-1 ring-inset ring-white/5">
+      <div className="flex items-center gap-2">
+        <span className="text-sm">{label}</span>
+        {locked[key] ? <Badge tone="warn" title="Set by env var. Edit .env to change.">env</Badge>
+          : sources[key] === 'db' ? <Badge tone="info">custom</Badge> : <Badge tone="dim">default</Badge>}
+      </div>
+      {input}
+      <span className="text-[11px] text-[#5b6b82]">{hint}{locked[key] ? ' Locked by env.' : ''}</span>
+    </div>
+  );
+  const num = (key: string, min: number, max: number) => (
+    <input type="number" min={min} max={max} disabled={!!locked[key]} value={Number(vals[key] ?? 0)}
+      onChange={(e) => set(key, Number(e.target.value))}
+      className="w-full rounded-lg border border-[#1e2a3f] bg-black/30 px-2 py-1.5 text-sm outline-none focus:border-[#58a6ff]/60 disabled:opacity-50" />
+  );
+  const toggle = (key: string) => (
+    <button disabled={!!locked[key]} onClick={() => set(key, !vals[key])}
+      className={`w-11 rounded-full p-1 transition-colors disabled:opacity-50 ${vals[key] ? 'bg-[#3fb950]/60' : 'bg-white/10'}`}>
+      <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${vals[key] ? 'translate-x-5' : ''}`} />
+    </button>
+  );
+  const csv = (key: string, placeholder: string) => (
+    <textarea rows={2} disabled={!!locked[key]} value={String(vals[key] ?? '')}
+      onChange={(e) => set(key, e.target.value)} placeholder={placeholder}
+      className="w-full rounded-lg border border-[#1e2a3f] bg-black/30 px-2 py-1.5 font-mono text-xs outline-none focus:border-[#58a6ff]/60 disabled:opacity-50" />
+  );
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <Card title="Enforcement" icon={<ShieldCheck size={15} className="text-[#3fb950]" />}>
-        <dl className="space-y-1.5 text-sm">
-          {[
-            ['Bans', status.ban_enabled ? 'on' : 'off'],
-            ['Auto-ban', status.ban_auto ? `on (${status.ban_threshold} fails / ${status.ban_window}s)` : 'off'],
-            ['Jail', status.ban_jail],
-            ['Reports', status.report_enabled ? `on (${status.report_provider}, ${status.report_throttle_days}d throttle)` : 'off'],
-            ['Auth mode', status.auth_mode],
-          ].map(([k, v]) => (
-            <div key={k} className="flex gap-2">
-              <dt className="w-24 shrink-0 text-[#8b98ad]">{k}</dt>
-              <dd>{v}</dd>
-            </div>
+      <Card title="Enforcement and fail2ban" icon={<ShieldCheck size={15} className="text-[#3fb950]" />}
+        action={<button onClick={save} disabled={saving} className="rounded-xl bg-[#58a6ff]/20 px-3 py-1.5 text-xs font-medium text-white ring-1 ring-inset ring-[#58a6ff]/50 hover:bg-[#58a6ff]/30 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>}>
+        <div className="space-y-2">
+          {row('ban_enabled', 'Bans', 'Write bans to DB plus banlist. Firewall needs fail2ban. See docs/FAIL2BAN.md.', toggle('ban_enabled'))}
+          {row('ban_jail', 'Jail', 'fail2ban jail name, e.g. sshd.', (
+            <input value={String(vals.ban_jail ?? '')} disabled={!!locked.ban_jail} onChange={(e) => set('ban_jail', e.target.value)}
+              className="w-full rounded-lg border border-[#1e2a3f] bg-black/30 px-2 py-1.5 text-sm outline-none focus:border-[#58a6ff]/60 disabled:opacity-50" />
           ))}
-        </dl>
-        <p className="mt-3 text-xs text-[#8b98ad]">
-          Change values with env vars (BAN_*, REPORT_*, see .env.example). Restart central to apply.
-        </p>
+          {row('ban_time', 'Ban time (s)', 'Manual ban life, 300 to 2592000.', num('ban_time', 300, 2592000))}
+          {row('ban_auto', 'Auto-ban', 'Auto block hammering IPs each 60s.', toggle('ban_auto'))}
+          {row('ban_threshold', 'Threshold', 'Fails to trigger auto-ban, 3 to 10000.', num('ban_threshold', 3, 10000))}
+          {row('ban_window', 'Window (s)', 'Count fails inside this time, 60 to 604800.', num('ban_window', 60, 604800))}
+          {row('ban_auto_time', 'Auto-ban time (s)', 'Auto-ban life, 300 to 2592000.', num('ban_auto_time', 300, 2592000))}
+          {row('report_enabled', 'Reports', 'Send high-risk IPs to provider.', toggle('report_enabled'))}
+          {row('report_provider', 'Provider', 'abuseipdb, webhook, or all.', (
+            <select value={String(vals.report_provider ?? 'abuseipdb')} disabled={!!locked.report_provider}
+              onChange={(e) => set('report_provider', e.target.value)}
+              className="w-full rounded-lg border border-[#1e2a3f] bg-black/30 px-2 py-1.5 text-sm outline-none focus:border-[#58a6ff]/60 disabled:opacity-50">
+              {['abuseipdb', 'webhook', 'all'].map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          ))}
+          {row('report_throttle_days', 'Throttle (days)', 'One report per IP per window, 1 to 90.', num('report_throttle_days', 1, 90))}
+          {row('report_min_risk', 'Min risk', 'Report only at or above this score, 0 to 100.', num('report_min_risk', 0, 100))}
+          {row('report_min_hits', 'Min hits', 'Report only at or above this count.', num('report_min_hits', 2, 100000))}
+          <div className="text-xs text-[#8b98ad]">Auth mode: {status.auth_mode}. Env var set locks a field. DB values apply now. Fail2ban setup: docs/FAIL2BAN.md.</div>
+          {msg && <p className="text-xs text-[#a5d6ff]">{msg}</p>}
+        </div>
       </Card>
-      <PasswordCard />
+      <div className="space-y-4">
+        <Card title="Allow lists and detection" icon={<ShieldCheck size={15} className="text-[#58a6ff]" />}
+          action={<button onClick={save} disabled={saving} className="rounded-xl bg-[#58a6ff]/20 px-3 py-1.5 text-xs font-medium text-white ring-1 ring-inset ring-[#58a6ff]/50 hover:bg-[#58a6ff]/30 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>}>
+          <div className="space-y-2">
+            {row('whitelist_ips', 'Whitelist IPs', 'Never list or ban these IPs. Comma separated.', csv('whitelist_ips', '1.2.3.4, 5.6.7.8'))}
+            {row('trusted_ips', 'Trusted IPs', 'Accepted logins from other IPs flag as suspicious.', csv('trusted_ips', '1.2.3.4, 5.6.7.8'))}
+            {row('trusted_users', 'Trusted users', 'Accepted logins for other users flag as suspicious.', csv('trusted_users', 'ubuntu, deploy'))}
+            {row('self_public_ips', 'Self public IPs', 'Your NAT egress IPs to exclude from stats.', csv('self_public_ips', '1.2.3.4'))}
+            {row('abusers_min_hits', 'Abusers min hits', 'Public list needs this many fails, 2 to 100000.', num('abusers_min_hits', 2, 100000))}
+            {row('abusers_min_score', 'Abusers min score', 'Public list needs this risk score, 0 to 100.', num('abusers_min_score', 0, 100))}
+            {row('abusers_public', 'Public abusers feed', 'Open /api/abusers plus /abusers without login. Still safe fields only.', toggle('abusers_public'))}
+            {msg && <p className="text-xs text-[#a5d6ff]">{msg}</p>}
+          </div>
+        </Card>
+        <PasswordCard />
+      </div>
     </div>
   );
 }
