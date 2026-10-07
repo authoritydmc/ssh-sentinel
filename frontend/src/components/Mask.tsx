@@ -14,6 +14,12 @@ export function maskIp(ip: string, on: boolean): string {
   return '***.***.***';
 }
 
+export function maskLoginIp(ip: string, on: boolean): string {
+  if (!on) return ip;
+  if (ip.includes(':')) return '****:****:****';
+  return '••••••';
+}
+
 export function maskUser(u: string, on: boolean): string {
   if (!on) return u;
   if (u === '?' || u === '') return u;

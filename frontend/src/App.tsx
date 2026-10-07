@@ -15,7 +15,7 @@ const AttackerModal = lazy(() => import('./components/AttackerModal'));
 const VersionModal = lazy(() => import('./components/VersionModal'));
 import { eventTone, } from './components/ui';
 import { REPO_URL, TZ, fetchAuth, fetchSelf, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type SelfInfo, type Summary } from './lib/api';
-import { MaskProvider, maskHost, maskIp, maskLine, maskUser, useMask } from './components/Mask';
+import { MaskProvider, maskHost, maskIp, maskLine, maskLoginIp, maskUser, useMask } from './components/Mask';
 import { EyeOff } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -77,10 +77,18 @@ function Shell() {
   const stats = useMemo(() => {
     if (!data) return null;
     const peak = data.timeline.reduce((a, t) => (t[1] > a[1] ? t : a), [0, 0, 0] as [number, number, number]);
-    const bycc: Record<string, number> = {};
+    const bycc: Record<string, { hits: number; country: string; flag: string }> = {};
     const byuser: Record<string, number> = {};
-    data.top.forEach((t) => { bycc[t.cc || '?'] = (bycc[t.cc || '?'] || 0) + t.hits; byuser[t.user] = (byuser[t.user] || 0) + t.hits; });
-    const topcc = Object.entries(bycc).sort((a, b) => b[1] - a[1])[0] ?? ['?', 0];
+    data.top.forEach((t) => {
+      const k = t.cc || '?';
+      bycc[k] = bycc[k] ?? { hits: 0, country: t.country || k, flag: t.flag || '' };
+      bycc[k].hits += t.hits;
+      if (t.country) bycc[k].country = t.country;
+      if (t.flag) bycc[k].flag = t.flag;
+      byuser[t.user] = (byuser[t.user] || 0) + t.hits;
+    });
+    const topEntry = Object.entries(bycc).sort((a, b) => b[1].hits - a[1].hits)[0] ?? ['?', { hits: 0, country: '?', flag: '' }];
+    const topcc = { cc: topEntry[0], hits: topEntry[1].hits, country: topEntry[1].country, flag: topEntry[1].flag };
     const topuser = Object.entries(byuser).sort((a, b) => b[1] - a[1])[0] ?? ['?', 0];
     const okTotal = data.timeline.reduce((a, t) => a + (t[2] || 0), 0);
     return { peak, topcc, topuser, okTotal };
@@ -88,18 +96,26 @@ function Shell() {
 
   const regions = useMemo(() => {
     if (!data) return [];
-    const m: Record<string, { cc: string; country: string; hits: number }> = {};
+    const m: Record<string, { cc: string; country: string; flag: string; hits: number; ips: number }> = {};
     data.top.forEach((t) => {
       const k = t.cc || '?';
-      m[k] = m[k] ?? { cc: k, country: t.country || k, hits: 0 };
+      m[k] = m[k] ?? { cc: k, country: t.country || k, flag: t.flag || '', hits: 0, ips: 0 };
       m[k].hits += t.hits;
+      m[k].ips += 1;
+      if (t.country) m[k].country = t.country;
+      if (t.flag) m[k].flag = t.flag;
     });
     return Object.values(m).sort((a, b) => b.hits - a.hits);
   }, [data]);
 
   const pins = useMemo(() => (data?.top ?? [])
     .filter((t) => t.lat != null && t.lon != null)
-    .map((t) => ({ lat: t.lat as number, lon: t.lon as number, hits: t.hits, label: maskIp(t.ip, masked) })), [data, masked]);
+    .map((t) => ({
+      lat: t.lat as number, lon: t.lon as number, hits: t.hits,
+      label: maskIp(t.ip, masked), ip: t.ip,
+      cc: t.cc || '?', country: t.country || '', city: t.city || '',
+      flag: t.flag || '', org: t.org || '',
+    })), [data, masked]);
 
   return (
     <div className="flex min-h-screen">
@@ -210,7 +226,7 @@ function Shell() {
                     <MetricCard icon={<Globe2 size={16} />} label="Attacker IPs" value={data.ips} sub={`${data.geo_cached} geo-located`} tone="acc" />
                     <MetricCard icon={<CheckCircle2 size={16} />} label="Successful logins" value={data.logins.length} sub={(data.suspicious_count ?? 0) > 0 ? `${data.suspicious_count} SUSPICIOUS — review` : 'last 60 in range · usernames masked'} tone={(data.suspicious_count ?? 0) > 0 ? 'bad' : 'ok'} />
                     <MetricCard icon={<Activity size={16} />} label="Peak hour" value={`${stats!.peak[1]}/h`} sub="48h window" tone="warn" />
-                    <MetricCard icon={<MapIcon size={16} />} label="Top origin" value={stats!.topcc[0]} sub={`${stats!.topcc[1]} hits`} tone="acc" />
+                    <MetricCard icon={<MapIcon size={16} />} label="Top origin" value={`${stats!.topcc.flag ? `${stats!.topcc.flag} ` : ''}${stats!.topcc.cc}`} sub={`${stats!.topcc.country} · ${stats!.topcc.hits} hits`} tone="acc" />
                     <MetricCard icon={<Users size={16} />} label="Most wanted" value={maskUser(stats!.topuser[0], masked)} sub={`${stats!.topuser[1]} tries`} tone="bad" />
                   </div>
                   {!data.trusted_configured && (
@@ -234,7 +250,7 @@ function Shell() {
                   </div>
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                     <Card title="World attack map" icon={<Globe2 size={15} className="text-[#58a6ff]" />} className="xl:col-span-2">
-                      <Suspense fallback={<Skeleton className="h-56" />}><WorldMap pins={pins} /></Suspense>
+                      <Suspense fallback={<Skeleton className="h-56" />}><WorldMap pins={pins} total={data.total} /></Suspense>
                     </Card>
                     <Card title="Top attacking regions" icon={<MapIcon size={15} className="text-[#f0883e]" />}>
                       <Suspense fallback={<Skeleton className="h-48" />}><RegionChart rows={regions} /></Suspense>
@@ -601,7 +617,7 @@ function SuspiciousBanner({ logins, onIp }: { logins: Summary['logins']; onIp: (
               <tr key={i} className="border-t border-[#f85149]/20">
                 <td className="py-1.5 pr-3"><Badge tone="bad">{l.reason || 'suspicious'}</Badge></td>
                 <td className="py-1.5 pr-3 font-mono text-white">{maskUser(l.user_display || l.user, masked)}</td>
-                <td className="py-1.5 pr-3 font-mono"><button onClick={() => onIp(l.ip)} className="text-[#a5d6ff] hover:underline">{maskIp(l.ip, masked)}</button></td>
+                <td className="py-1.5 pr-3 font-mono"><button onClick={() => onIp(l.ip)} className="text-[#a5d6ff] hover:underline">{maskLoginIp(l.ip, masked)}</button></td>
                 <td className="py-1.5 text-xs text-[#8b98ad]">{l.ts ? fmtT(l.ts) : '—'}</td>
               </tr>
             ))}
@@ -627,7 +643,7 @@ function LoginTable({ logins, onIp }: { logins: Summary['logins']; onIp: (ip: st
           {rows.map((l, i) => (
             <tr key={i} className="border-t border-[#1e2a3f]">
               <td className="py-1.5 pr-3 font-mono">{maskUser(l.user_display || l.user, masked)}</td>
-              <td className="py-1.5 pr-3 font-mono"><button onClick={() => onIp(l.ip)} className="text-[#a5d6ff] hover:underline">{maskIp(l.ip, masked)}</button></td>
+              <td className="py-1.5 pr-3 font-mono"><button onClick={() => onIp(l.ip)} className="text-[#a5d6ff] hover:underline">{maskLoginIp(l.ip, masked)}</button></td>
               <td className="py-1.5 pr-3 text-xs text-[#8b98ad]">{l.ts ? fmtT(l.ts) : '—'}</td>
               <td className="py-1.5">{l.suspicious ? <Badge tone="bad">⚠ {l.reason}</Badge> : <Badge tone="ok">trusted</Badge>}</td>
             </tr>

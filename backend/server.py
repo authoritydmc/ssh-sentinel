@@ -576,6 +576,323 @@ def activity_list(limit=200):
         return []
 
 
+# --- runtime enforcement config (env default, DB override from UI) --------
+# Env var set (non-empty) locks the key. Empty env means UI can edit.
+# UI values live in SQLite kv table. No restart is needed.
+ENFORCE_SPEC = {
+    "ban_enabled": ("BAN_ENABLED", "bool", False, None, None),
+    "ban_jail": ("BAN_JAIL", "str", "sshd", None, None),
+    "ban_time": ("BAN_TIME", "int", 86400, 300, 30 * 86400),
+    "ban_auto": ("BAN_AUTO", "bool", False, None, None),
+    "ban_threshold": ("BAN_THRESHOLD", "int", 20, 3, 10000),
+    "ban_window": ("BAN_WINDOW", "int", 600, 60, 7 * 86400),
+    "ban_auto_time": ("BAN_AUTO_TIME", "int", 86400, 300, 30 * 86400),
+    "report_enabled": ("REPORT_ENABLED", "bool", False, None, None),
+    "report_provider": ("REPORT_PROVIDER", "enum", "abuseipdb",
+                        None, None),
+    "report_throttle_days": ("REPORT_THROTTLE_DAYS", "int", 7, 1, 90),
+    "report_min_risk": ("REPORT_MIN_RISK", "int", 60, 0, 100),
+    "report_min_hits": ("REPORT_MIN_HITS", "int", 20, 2, 100000),
+    "whitelist_ips": ("WHITELIST_IPS", "csv_ip", "", None, None),
+    "trusted_ips": ("TRUSTED_IPS", "csv_ip", "", None, None),
+    "trusted_users": ("TRUSTED_USERS", "csv_user", "", None, None),
+    "self_public_ips": ("SELF_PUBLIC_IPS", "csv_ip", "", None, None),
+    "abusers_min_hits": ("ABUSERS_MIN_HITS", "int", 5, 2, 100000),
+    "abusers_min_score": ("ABUSERS_MIN_SCORE", "int", 25, 0, 100),
+    "abusers_public": ("ABUSERS_PUBLIC", "bool", False, None, None),
+}
+_REPORT_PROVIDERS = ("abuseipdb", "webhook", "all")
+_cfg_cache = {"ts": 0.0, "kv": {}}
+
+
+def _env_raw(name):
+    return os.environ.get(name, "").strip()
+
+
+def _env_locked(name):
+    return bool(_env_raw(name))
+
+
+def _parse_bool_raw(v, default=False):
+    return str(v).strip().lower() in ("1", "yes", "true", "on") if str(v).strip() else default
+
+
+def _parse_int_raw(v, default, lo, hi):
+    try:
+        return max(lo, min(hi, int(str(v).strip() or default)))
+    except (ValueError, TypeError):
+        return default
+
+
+def _clean_jail(v):
+    s = re.sub(r"[^A-Za-z0-9_-]", "", str(v).strip())[:32] or "sshd"
+    return s
+
+
+def _clean_provider(v):
+    s = str(v).strip().lower() or "abuseipdb"
+    return s if s in _REPORT_PROVIDERS else "abuseipdb"
+
+
+def _clean_csv_ip(v):
+    out = []
+    seen = set()
+    for part in re.split(r"[,\s\n]+", str(v or "")):
+        part = part.strip()
+        if not part or part in seen:
+            continue
+        try:
+            norm = str(ipaddress.ip_address(part))
+        except ValueError:
+            continue
+        seen.add(part)
+        out.append(norm)
+        if len(out) >= 200:
+            break
+    return ",".join(out)
+
+
+def _clean_csv_user(v):
+    out = []
+    seen = set()
+    for part in str(v or "").split(","):
+        part = part.strip()
+        if not part or part in seen:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", part):
+            continue
+        seen.add(part)
+        out.append(part)
+        if len(out) >= 200:
+            break
+    return ",".join(out)
+
+
+def _csv_to_set(v):
+    return {p.strip() for p in str(v or "").split(",") if p.strip()}
+
+
+def kv_get(key):
+    try:
+        c = db()
+        try:
+            r = c.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        finally:
+            c.close()
+        return r[0] if r else ""
+    except Exception:
+        return ""
+
+
+def kv_set(key, value):
+    c = db()
+    try:
+        c.execute("INSERT OR REPLACE INTO kv(key, value) VALUES(?,?)",
+                  (key, str(value)))
+        c.commit()
+    finally:
+        c.close()
+
+
+def _kv_all_cached():
+    now = time.time()
+    if now - _cfg_cache["ts"] < 5 and _cfg_cache["kv"]:
+        return _cfg_cache["kv"]
+    out = {}
+    try:
+        c = db()
+        try:
+            rows = c.execute("SELECT key, value FROM kv").fetchall()
+        finally:
+            c.close()
+        out = {k: v for k, v in rows}
+    except Exception:
+        out = {}
+    _cfg_cache.update({"ts": now, "kv": out})
+    return out
+
+
+def _eff_value(key):
+    env_name, kind, default, lo, hi = ENFORCE_SPEC[key]
+    raw = _env_raw(env_name)
+    if raw != "":
+        if kind == "bool":
+            return _parse_bool_raw(raw, default)
+        if kind == "int":
+            return _parse_int_raw(raw, default, lo, hi)
+        if key == "ban_jail":
+            return _clean_jail(raw) or default
+        if key == "report_provider":
+            return _clean_provider(raw)
+        if kind == "csv_ip":
+            return _clean_csv_ip(raw)
+        if kind == "csv_user":
+            return _clean_csv_user(raw)
+        return raw or default
+    kv = _kv_all_cached()
+    ck = "cfg:" + key
+    if ck in kv and str(kv[ck]).strip() != "":
+        v = kv[ck]
+        if kind == "bool":
+            return _parse_bool_raw(v, default)
+        if kind == "int":
+            return _parse_int_raw(v, default, lo, hi)
+        if key == "ban_jail":
+            return _clean_jail(v)
+        if key == "report_provider":
+            return _clean_provider(v)
+        if kind == "csv_ip":
+            return _clean_csv_ip(v)
+        if kind == "csv_user":
+            return _clean_csv_user(v)
+        return v
+    if kind in ("csv_ip", "csv_user"):
+        return ""
+    return default
+
+
+def eff_ban_enabled():
+    return bool(_eff_value("ban_enabled"))
+
+
+def eff_ban_jail():
+    return str(_eff_value("ban_jail"))
+
+
+def eff_ban_time():
+    return int(_eff_value("ban_time"))
+
+
+def eff_ban_auto():
+    return bool(_eff_value("ban_auto"))
+
+
+def eff_ban_threshold():
+    return int(_eff_value("ban_threshold"))
+
+
+def eff_ban_window():
+    return int(_eff_value("ban_window"))
+
+
+def eff_ban_auto_time():
+    return int(_eff_value("ban_auto_time"))
+
+
+def eff_report_enabled():
+    return bool(_eff_value("report_enabled"))
+
+
+def eff_report_provider():
+    return str(_eff_value("report_provider"))
+
+
+def eff_report_throttle_days():
+    return int(_eff_value("report_throttle_days"))
+
+
+def eff_report_min_risk():
+    return int(_eff_value("report_min_risk"))
+
+
+def eff_report_min_hits():
+    return int(_eff_value("report_min_hits"))
+
+
+def eff_whitelist():
+    return _csv_to_set(_eff_value("whitelist_ips"))
+
+
+def eff_trusted_ips():
+    base = set(TRUSTED_IPS)
+    base.update(_csv_to_set(_eff_value("trusted_ips")))
+    return base
+
+
+def eff_trusted_users():
+    base = set(TRUSTED_USERS)
+    base.update(_csv_to_set(_eff_value("trusted_users")))
+    return base
+
+
+def eff_self_public_extra():
+    return _csv_to_set(_eff_value("self_public_ips"))
+
+
+def eff_abusers_min_hits():
+    return int(_eff_value("abusers_min_hits"))
+
+
+def eff_abusers_min_score():
+    return int(_eff_value("abusers_min_score"))
+
+
+def eff_abusers_public():
+    return bool(_eff_value("abusers_public"))
+
+
+def get_enforcement_config():
+    kv = _kv_all_cached()
+    cfg = {}
+    locked = {}
+    sources = {}
+    for key, (env_name, kind, default, lo, hi) in ENFORCE_SPEC.items():
+        locked[key] = _env_locked(env_name)
+        if locked[key]:
+            sources[key] = "env"
+        elif ("cfg:" + key) in kv and str(kv["cfg:" + key]).strip() != "":
+            sources[key] = "db"
+        else:
+            sources[key] = "default"
+        cfg[key] = _eff_value(key)
+    return {"values": cfg, "locked": locked, "sources": sources}
+
+
+def update_enforcement_config(patch):
+    updated = {}
+    skipped = {}
+    for key, val in (patch or {}).items():
+        if key not in ENFORCE_SPEC:
+            continue
+        env_name, kind, default, lo, hi = ENFORCE_SPEC[key]
+        if _env_locked(env_name):
+            skipped[key] = "env locked"
+            continue
+        try:
+            if kind == "bool":
+                norm = "1" if str(val).strip().lower() in ("1", "yes", "true", "on", "on ") or val is True else ""
+                # Store 1/0 explicitly so default vs off is clear.
+                norm = "1" if _parse_bool_raw(val, False) else "0"
+            elif kind == "int":
+                norm = str(_parse_int_raw(val, default, lo, hi))
+            elif key == "ban_jail":
+                norm = _clean_jail(val)
+            elif key == "report_provider":
+                if str(val).strip().lower() not in _REPORT_PROVIDERS:
+                    skipped[key] = "bad provider"
+                    continue
+                norm = str(val).strip().lower()
+            elif kind == "csv_ip":
+                norm = _clean_csv_ip(val)
+                if str(val).strip() != "" and norm == "":
+                    skipped[key] = "no valid IPs"
+                    continue
+            elif kind == "csv_user":
+                norm = _clean_csv_user(val)
+                if str(val).strip() != "" and norm == "":
+                    skipped[key] = "no valid users"
+                    continue
+            else:
+                norm = str(val).strip()
+            kv_set("cfg:" + key, norm)
+            # Bust cache so next read sees the write.
+            _cfg_cache["ts"] = 0.0
+            updated[key] = _eff_value(key)
+        except Exception as e:
+            skipped[key] = type(e).__name__
+    return {"updated": updated, "skipped": skipped, "config": get_enforcement_config()}
+
+
 def _write_banlist(active_ips):
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -631,18 +948,24 @@ def ban_add(ip, reason="", source="manual", actor="admin", ttl=None):
             return {"ok": False, "error": "not a public IP"}
     except ValueError:
         return {"ok": False, "error": "bad ip"}
-    if ip in WHITELIST_IPS or ip in own_ips():
+    try:
+        _white = eff_whitelist()
+    except Exception:
+        _white = WHITELIST_IPS
+    if ip in _white or ip in own_ips():
         return {"ok": False, "error": "IP is whitelisted or self"}
-    ttl_s = BAN_TIME if ttl is None else max(300, min(30 * 86400, int(ttl)))
+    jail = eff_ban_jail()
+    enabled = eff_ban_enabled()
+    ttl_s = eff_ban_time() if ttl is None else max(300, min(30 * 86400, int(ttl)))
     now = time.time()
-    ok = _fail2ban("banip", BAN_JAIL, ip) if BAN_ENABLED else False
+    ok = _fail2ban("banip", jail, ip) if enabled else False
     try:
         c = db()
         try:
             c.execute("INSERT OR REPLACE INTO bans"
                       "(ip, jail, reason, source, created, expires, active, fail2ban_ok)"
                       " VALUES(?,?,?,?,?,?,1,?)",
-                      (ip, BAN_JAIL, str(reason)[:200], str(source)[:20],
+                      (ip, jail, str(reason)[:200], str(source)[:20],
                        now, now + ttl_s, 1 if ok else 0))
             c.commit()
         finally:
@@ -650,7 +973,7 @@ def ban_add(ip, reason="", source="manual", actor="admin", ttl=None):
     except Exception as e:
         return {"ok": False, "error": type(e).__name__}
     _write_banlist([b["ip"] for b in ban_list_active()])
-    activity_log(actor, "ban", ip, "%s via %s f2b=%s" % (source, BAN_JAIL, ok))
+    activity_log(actor, "ban", ip, "%s via %s f2b=%s" % (source, jail, ok))
     return {"ok": True, "ip": ip, "fail2ban_ok": ok,
             "expires": int((now + ttl_s) * 1000)}
 
@@ -659,7 +982,9 @@ def ban_remove(ip, actor="admin"):
     ip = _valid_ip(ip)
     if not ip:
         return {"ok": False, "error": "bad ip"}
-    ok = _fail2ban("unbanip", BAN_JAIL, ip) if BAN_ENABLED else False
+    jail = eff_ban_jail()
+    enabled = eff_ban_enabled()
+    ok = _fail2ban("unbanip", jail, ip) if enabled else False
     try:
         c = db()
         try:
@@ -670,7 +995,7 @@ def ban_remove(ip, actor="admin"):
     except Exception as e:
         return {"ok": False, "error": type(e).__name__}
     _write_banlist([b["ip"] for b in ban_list_active()])
-    activity_log(actor, "unban", ip, "via %s f2b=%s" % (BAN_JAIL, ok))
+    activity_log(actor, "unban", ip, "via %s f2b=%s" % (jail, ok))
     return {"ok": True, "ip": ip}
 
 
@@ -728,7 +1053,7 @@ def _report_due(ip, provider):
             c.close()
         if not r:
             return True
-        return (time.time() - r[0]) > REPORT_THROTTLE_DAYS * 86400
+        return (time.time() - r[0]) > eff_report_throttle_days() * 86400
     except Exception:
         return True
 
@@ -799,14 +1124,15 @@ def report_ip(ip, hits, risk, band, actor="system"):
     ip = _valid_ip(ip)
     if not ip:
         return {"ok": False, "error": "bad ip"}
-    if not REPORT_ENABLED:
+    if not eff_report_enabled():
         return {"ok": False, "error": "reports off"}
-    if hits < REPORT_MIN_HITS or risk < REPORT_MIN_RISK:
+    if hits < eff_report_min_hits() or risk < eff_report_min_risk():
         return {"ok": False, "error": "below bar"}
     providers = []
-    if REPORT_PROVIDER in ("abuseipdb", "all"):
+    prov = eff_report_provider()
+    if prov in ("abuseipdb", "all"):
         providers.append("abuseipdb")
-    if REPORT_PROVIDER in ("webhook", "all"):
+    if prov in ("webhook", "all"):
         providers.append("webhook")
     out = {}
     for p in providers:
@@ -825,13 +1151,50 @@ def report_ip(ip, hits, risk, band, actor="system"):
 
 def admin_status():
     tok, _ = _setup_token()
+    try:
+        enf = get_enforcement_config()
+        vals = enf["values"]
+    except Exception:
+        vals = {"ban_enabled": BAN_ENABLED, "ban_auto": BAN_AUTO,
+                "ban_jail": BAN_JAIL, "ban_threshold": BAN_THRESHOLD,
+                "ban_window": BAN_WINDOW, "ban_time": BAN_TIME,
+                "ban_auto_time": BAN_AUTO_TIME,
+                "report_enabled": REPORT_ENABLED,
+                "report_provider": REPORT_PROVIDER,
+                "report_throttle_days": REPORT_THROTTLE_DAYS,
+                "report_min_risk": REPORT_MIN_RISK,
+                "report_min_hits": REPORT_MIN_HITS,
+                "whitelist_ips": ",".join(sorted(WHITELIST_IPS)),
+                "trusted_ips": ",".join(sorted(TRUSTED_IPS)),
+                "trusted_users": ",".join(sorted(TRUSTED_USERS)),
+                "self_public_ips": "",
+                "abusers_min_hits": ABUSERS_MIN_HITS,
+                "abusers_min_score": ABUSERS_MIN_SCORE,
+                "abusers_public": ABUSERS_PUBLIC}
+        enf = {"locked": {}, "sources": {}}
     return {"setup_needed": not _local_configured(),
             "setup_token_configured": bool(tok),
-            "ban_enabled": BAN_ENABLED, "ban_auto": BAN_AUTO,
-            "ban_jail": BAN_JAIL, "ban_threshold": BAN_THRESHOLD,
-            "ban_window": BAN_WINDOW,
-            "report_enabled": REPORT_ENABLED, "report_provider": REPORT_PROVIDER,
-            "report_throttle_days": REPORT_THROTTLE_DAYS,
+            "ban_enabled": vals.get("ban_enabled", False),
+            "ban_auto": vals.get("ban_auto", False),
+            "ban_jail": vals.get("ban_jail", "sshd"),
+            "ban_threshold": vals.get("ban_threshold", 20),
+            "ban_window": vals.get("ban_window", 600),
+            "ban_time": vals.get("ban_time", 86400),
+            "ban_auto_time": vals.get("ban_auto_time", 86400),
+            "report_enabled": vals.get("report_enabled", False),
+            "report_provider": vals.get("report_provider", "abuseipdb"),
+            "report_throttle_days": vals.get("report_throttle_days", 7),
+            "report_min_risk": vals.get("report_min_risk", 60),
+            "report_min_hits": vals.get("report_min_hits", 20),
+            "whitelist_ips": vals.get("whitelist_ips", ""),
+            "trusted_ips": vals.get("trusted_ips", ""),
+            "trusted_users": vals.get("trusted_users", ""),
+            "self_public_ips": vals.get("self_public_ips", ""),
+            "abusers_min_hits": vals.get("abusers_min_hits", 5),
+            "abusers_min_score": vals.get("abusers_min_score", 25),
+            "abusers_public": vals.get("abusers_public", False),
+            "enforce_locked": enf.get("locked", {}),
+            "enforce_sources": enf.get("sources", {}),
             "alert_configured": bool(ALERT_WEBHOOK_URL),
             "alert_on_success": ALERT_ON_SUCCESS,
             "alert_spike_threshold": ALERT_SPIKE_THRESHOLD,
@@ -916,14 +1279,17 @@ def _sync_ip_stats(entries):
 
 
 def _auto_ban_scan():
-    if not BAN_AUTO:
+    if not eff_ban_auto():
         return 0
     try:
         lines = read_lines("all")[-20000:]
     except Exception:
         return 0
     now = datetime.now()
-    cutoff = time.time() - BAN_WINDOW
+    ban_window = eff_ban_window()
+    ban_threshold = eff_ban_threshold()
+    ban_auto_time = eff_ban_auto_time()
+    cutoff = time.time() - ban_window
     per_ip = Counter()
     for ln in lines:
         m = FAIL_RE.search(ln) or INVALID_RE.search(ln)
@@ -954,42 +1320,50 @@ def _auto_ban_scan():
     except Exception:
         pass
     active = {b["ip"] for b in ban_list_active()}
+    try:
+        _white = eff_whitelist()
+        _min_score = eff_abusers_min_score()
+    except Exception:
+        _white, _min_score = WHITELIST_IPS, ABUSERS_MIN_SCORE
     n = 0
     for ip, hits in per_ip.most_common(100):
-        if hits < BAN_THRESHOLD:
+        if hits < ban_threshold:
             continue
-        if ip in active or ip in mine or ip in WHITELIST_IPS:
+        if ip in active or ip in mine or ip in _white:
             continue
         if not is_public_ip(ip) or ip in accepted:
             continue
-        velocity = hits * 3600.0 / max(60, BAN_WINDOW)
+        velocity = hits * 3600.0 / max(60, ban_window)
         ext = abuse_score(ip) if ABUSEIPDB_KEY else 0
         score, _band, _reasons = risk_of(hits, 3, int(time.time() * 1000),
                                          False, ext, velocity, prior_ban_flag(ip))
-        if score < ABUSERS_MIN_SCORE:
+        if score < _min_score:
             continue
-        r = ban_add(ip, "auto: %d fails in %ds" % (hits, BAN_WINDOW),
-                    "auto", "system", BAN_AUTO_TIME)
+        r = ban_add(ip, "auto: %d fails in %ds" % (hits, ban_window),
+                    "auto", "system", ban_auto_time)
         if r.get("ok"):
             n += 1
     return n
 
 
 def _auto_report_scan():
-    if not REPORT_ENABLED:
+    if not eff_report_enabled():
         return 0
     try:
         entries = abusers("all")[:30]
     except Exception:
         return 0
     _sync_ip_stats(entries)
+    min_hits = eff_report_min_hits()
+    min_risk = eff_report_min_risk()
+    prov = eff_report_provider()
     n = 0
     for e in entries:
-        if e.get("hits", 0) < REPORT_MIN_HITS or e.get("risk", 0) < REPORT_MIN_RISK:
+        if e.get("hits", 0) < min_hits or e.get("risk", 0) < min_risk:
             continue
         due = any(_report_due(e["ip"], p) for p in (
-            ["abuseipdb"] if REPORT_PROVIDER == "abuseipdb" else
-            ["webhook"] if REPORT_PROVIDER == "webhook" else ["abuseipdb", "webhook"]))
+            ["abuseipdb"] if prov == "abuseipdb" else
+            ["webhook"] if prov == "webhook" else ["abuseipdb", "webhook"]))
         if not due:
             continue
         r = report_ip(e["ip"], e["hits"], e["risk"], e.get("band", ""), "system")
@@ -1106,11 +1480,15 @@ def version_info():
 
 def auth_status(user=None):
     login = {"none": "none", "forward": "forward", "oidc": "oidc"}.get(AUTH_MODE, "basic")
+    try:
+        pub = eff_abusers_public()
+    except Exception:
+        pub = ABUSERS_PUBLIC
     return {"mode": AUTH_MODE, "login": login,
             "user": user or None,
             "safe": AUTH_MODE in ("local", "forward", "oidc"),
             "version": app_version(),
-            "abusers_public": ABUSERS_PUBLIC,
+            "abusers_public": pub,
             "setup_needed": AUTH_MODE == "local" and not _local_configured()}
 
 
@@ -1507,6 +1885,10 @@ def own_ips():
         part = part.strip()
         if part:
             found.add(part)
+    try:
+        found.update(eff_self_public_extra())
+    except Exception:
+        pass
     _own_ips, _own_ts = found, time.time()
     return _own_ips
 
@@ -1658,11 +2040,16 @@ def classify_accept(user, ip, failed_ips, mine):
     Attacker IPs are always shown fully — no PII masking there.
     """
     reasons = []
+    try:
+        t_ips = eff_trusted_ips()
+        t_users = eff_trusted_users()
+    except Exception:
+        t_ips, t_users = TRUSTED_IPS, TRUSTED_USERS
     if ip in failed_ips:
         reasons.append("fail-then-accept")
-    if TRUSTED_IPS and ip not in TRUSTED_IPS and ip not in mine:
+    if t_ips and ip not in t_ips and ip not in mine:
         reasons.append("unknown-ip")
-    if TRUSTED_USERS and user not in TRUSTED_USERS:
+    if t_users and user not in t_users:
         reasons.append("unknown-user")
     suspicious = bool(reasons)
     return suspicious, "+".join(reasons), (not suspicious)
@@ -1672,6 +2059,10 @@ def summary(host=None):
     lines = read_lines(host or "all")
     now = datetime.now()
     mine = own_ips()
+    try:
+        white = eff_whitelist()
+    except Exception:
+        white = WHITELIST_IPS
     skipped_self = 0
     skipped_white = 0
     pair_counts, per_ip, hours, ok_hours = Counter(), Counter(), defaultdict(int), defaultdict(int)
@@ -1682,7 +2073,7 @@ def summary(host=None):
             if m.group(2) in mine:
                 skipped_self += 1
                 continue
-            if m.group(2) in WHITELIST_IPS:
+            if m.group(2) in white:
                 skipped_white += 1
                 continue
             pair_counts[(m.group(1), m.group(2))] += 1
@@ -1696,7 +2087,7 @@ def summary(host=None):
             if m.group(1) in mine:
                 skipped_self += 1
                 continue
-            if m.group(1) in WHITELIST_IPS:
+            if m.group(1) in white:
                 skipped_white += 1
                 continue
             # Pre-auth probe with no username (scanner handshake / disconnect).
@@ -1745,11 +2136,15 @@ def summary(host=None):
         tl.append([h, hours.get(h, 0), ok_hours.get(h, 0)])
     strict = (PRIVACY_MODE == "strict")
     self_ips_out = [mask_ip(ip) for ip in sorted(mine)] if strict else sorted(mine)
+    try:
+        trusted_cfg = bool(eff_trusted_ips() or eff_trusted_users())
+    except Exception:
+        trusted_cfg = bool(TRUSTED_IPS or TRUSTED_USERS)
     return {"total": sum(per_ip.values()), "ips": len(per_ip), "top": top,
             "timeline": tl, "logins": logins[-60:],
             "suspicious_count": sum(1 for e in logins if e.get("suspicious")),
             "privacy_mode": PRIVACY_MODE,
-            "trusted_configured": bool(TRUSTED_IPS or TRUSTED_USERS),
+            "trusted_configured": trusted_cfg,
             "excluded_self": skipped_self, "excluded_whitelisted": skipped_white,
             "self_ips": self_ips_out,
             "geo_cached": sum(1 for k in _cache if k.startswith("geo:")),
@@ -1837,6 +2232,12 @@ def abusers(host=None):
     lines = read_lines(host)
     now = datetime.now()
     mine = own_ips()
+    try:
+        white = eff_whitelist()
+        min_hits = eff_abusers_min_hits()
+        min_score = eff_abusers_min_score()
+    except Exception:
+        white, min_hits, min_score = WHITELIST_IPS, ABUSERS_MIN_HITS, ABUSERS_MIN_SCORE
     per_ip = Counter()
     users = defaultdict(Counter)
     accepted = set()
@@ -1858,7 +2259,7 @@ def abusers(host=None):
         if not grp:
             continue
         u, ip = grp
-        if ip in mine or ip in WHITELIST_IPS or not is_public_ip(ip):
+        if ip in mine or ip in white or not is_public_ip(ip):
             continue
         per_ip[ip] += 1
         users[ip][u] += 1
@@ -1870,7 +2271,7 @@ def abusers(host=None):
             if ip not in last or e > last[ip]:
                 last[ip] = e
     cands = [(ip, hits) for ip, hits in per_ip.most_common(200)
-             if hits >= ABUSERS_MIN_HITS]
+             if hits >= min_hits]
     geo_lookup([ip for ip, _ in cands])
     # External abuse intel only for IPs that pass the local bar (saves quota).
     ext = {}
@@ -1879,13 +2280,13 @@ def abusers(host=None):
             ext[ip] = abuse_score(ip)
     entries = []
     for ip, hits in per_ip.most_common(500):
-        if hits < ABUSERS_MIN_HITS:
+        if hits < min_hits:
             continue
         g = _cache.get("geo:" + ip, {})
         top_users = users[ip].most_common(5)
         score, band, reasons = risk_of(hits, len(users[ip]), last.get(ip),
                                        ip in accepted, ext.get(ip, 0))
-        if score < ABUSERS_MIN_SCORE or ip in accepted:
+        if score < min_score or ip in accepted:
             continue
         entries.append({
             "ip": ip, "hits": hits,
@@ -2083,9 +2484,13 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 entries = []
             hit = next((e for e in entries if e["ip"] == me), None)
+            try:
+                _white = eff_whitelist()
+            except Exception:
+                _white = WHITELIST_IPS
             if mine is not None and not mine.is_global:
                 msg = "your address is not a public IP — nothing to check"
-            elif me in WHITELIST_IPS:
+            elif me in _white:
                 msg = "your IP is whitelisted by the admin — you are clear"
             elif hit:
                 msg = ("your IP %s has %d failed attempts (risk %d/%s). "
@@ -2094,7 +2499,7 @@ class H(BaseHTTPRequestHandler):
             else:
                 msg = "your IP is not on the attacker list — you are clear"
             return self._send(json.dumps({
-                "ip": me, "whitelisted": me in WHITELIST_IPS,
+                "ip": me, "whitelisted": me in _white,
                 "listed": hit is not None,
                 "hits": hit["hits"] if hit else 0,
                 "risk": hit["risk"] if hit else 0,
@@ -2103,7 +2508,11 @@ class H(BaseHTTPRequestHandler):
                 "last": hit["last"] if hit else None,
                 "message": msg}), "application/json")
         if u.path == "/abusers":
-            if not ABUSERS_PUBLIC:
+            try:
+                _pub = eff_abusers_public()
+            except Exception:
+                _pub = ABUSERS_PUBLIC
+            if not _pub:
                 return self._send(json.dumps({"error": "public list is off "
                                                        "(ABUSERS_PUBLIC=1 enables it)"}),
                                   "application/json", 404)
@@ -2111,7 +2520,11 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/abusers":
             # Safe fields only, but behind the UI gate unless the owner
             # opens it explicitly with ABUSERS_PUBLIC=1.
-            if not ABUSERS_PUBLIC:
+            try:
+                _pub2 = eff_abusers_public()
+            except Exception:
+                _pub2 = ABUSERS_PUBLIC
+            if not _pub2:
                 user, gate = self._gate()
                 if gate is not None:
                     return self._deny(gate)
@@ -2152,6 +2565,8 @@ class H(BaseHTTPRequestHandler):
         self._auth_user = user
         if u.path == "/api/admin/bans":
             return self._send(json.dumps({"bans": ban_list_active()}), "application/json")
+        if u.path == "/api/admin/config":
+            return self._send(json.dumps(get_enforcement_config()), "application/json")
         if u.path == "/api/admin/activity":
             try:
                 lim = max(1, min(500, int(q.get("limit", ["200"])[0])))
@@ -2450,16 +2865,26 @@ class H(BaseHTTPRequestHandler):
                 v = str(q["ip"][0])
             ip = v[:45]
             try:
-                hits = int(body_get.get("hits", REPORT_MIN_HITS) or REPORT_MIN_HITS)
+                hits = int(body_get.get("hits", eff_report_min_hits()) or eff_report_min_hits())
             except (ValueError, TypeError):
-                hits = REPORT_MIN_HITS
+                hits = eff_report_min_hits()
             try:
-                risk = int(body_get.get("risk", REPORT_MIN_RISK) or REPORT_MIN_RISK)
+                risk = int(body_get.get("risk", eff_report_min_risk()) or eff_report_min_risk())
             except (ValueError, TypeError):
-                risk = REPORT_MIN_RISK
+                risk = eff_report_min_risk()
             band = str(body_get.get("band", "high"))[:20]
             r = report_ip(ip, hits, risk, band, actor)
             code = 200 if r.get("ok") else 400
+            return self._send(json.dumps(r), "application/json", code)
+        if u.path == "/api/admin/config":
+            body = self._read_json()
+            r = update_enforcement_config(body)
+            try:
+                activity_log(actor, "config", "", "enforcement update: " +
+                               ", ".join(sorted(r.get("updated", {}).keys()))[:200])
+            except Exception:
+                pass
+            code = 200 if r.get("updated") else 400 if r.get("skipped") else 200
             return self._send(json.dumps(r), "application/json", code)
         return self._send("not found", "text/plain", 404)
 
@@ -2582,9 +3007,14 @@ if __name__ == "__main__":
         if not tok:
             print("auth: setup token missing — set ADMIN_SETUP_TOKEN", flush=True)
     threading.Thread(target=_ops_loop, daemon=True).start()
-    print("ops: bans auto=%s threshold=%d/%ds jail=%s reports=%s provider=%s" % (
-        BAN_AUTO, BAN_THRESHOLD, BAN_WINDOW, BAN_JAIL,
-        REPORT_ENABLED, REPORT_PROVIDER), flush=True)
+    try:
+        print("ops: bans auto=%s threshold=%d/%ds jail=%s reports=%s provider=%s" % (
+            eff_ban_auto(), eff_ban_threshold(), eff_ban_window(),
+            eff_ban_jail(), eff_report_enabled(), eff_report_provider()), flush=True)
+    except Exception:
+        print("ops: bans auto=%s threshold=%d/%ds jail=%s reports=%s provider=%s" % (
+            BAN_AUTO, BAN_THRESHOLD, BAN_WINDOW, BAN_JAIL,
+            REPORT_ENABLED, REPORT_PROVIDER), flush=True)
     if AUTH_MODE == "none":
         print("auth: MODE=none (open) — keep 8079 on tailnet/localhost or behind SSO; "
               "set AUTH_MODE=local|forward for login", flush=True)

@@ -78,9 +78,18 @@ async function post<T>(p: string, body: unknown): Promise<T> {
 export interface AdminStatus {
   setup_needed: boolean; setup_token_configured: boolean;
   ban_enabled: boolean; ban_auto: boolean; ban_jail: string;
-  ban_threshold: number; ban_window: number;
+  ban_threshold: number; ban_window: number; ban_time: number; ban_auto_time: number;
   report_enabled: boolean; report_provider: string; report_throttle_days: number;
+  report_min_risk: number; report_min_hits: number;
+  whitelist_ips: string; trusted_ips: string; trusted_users: string; self_public_ips: string;
+  abusers_min_hits: number; abusers_min_score: number; abusers_public: boolean;
+  enforce_locked?: Record<string, boolean>; enforce_sources?: Record<string, string>;
   auth_mode: string; version?: string;
+}
+export interface EnforcementConfig {
+  values: Record<string, string | number | boolean>;
+  locked: Record<string, boolean>;
+  sources: Record<string, string>;
 }
 export interface BanEntry {
   ip: string; jail: string; reason: string; source: string;
@@ -90,6 +99,9 @@ export interface ActivityEntry { ts: number; actor: string; action: string; ip: 
 export interface ReportEntry { ip: string; provider: string; ts: number; status: string; detail: string }
 
 export const fetchAdminStatus = () => get<AdminStatus>('admin/status');
+export const fetchEnforcement = () => get<EnforcementConfig>('admin/config');
+export const postEnforcement = (patch: Record<string, string | number | boolean>) =>
+  post<{ updated: Record<string, unknown>; skipped: Record<string, string>; config: EnforcementConfig }>('admin/config', patch);
 export const fetchBans = async (): Promise<BanEntry[]> =>
   (await get<{ bans: BanEntry[] }>('admin/bans')).bans;
 export const fetchActivity = async (limit = 200): Promise<ActivityEntry[]> =>
