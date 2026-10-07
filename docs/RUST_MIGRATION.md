@@ -5,17 +5,19 @@
 
 ## 1. Baseline (Python today)
 
-Image sizes come from Docker Hub (`rajlabs/ssh-sentinel`):
+Measured in CI on 2026-10-07 (`footprint` job, demo log, idle):
 
-| Tag | Arch | Compressed |
-| --- | --- | ---------- |
-| `latest` (v0.6.0 era) | amd64 | about 21 MB |
-| `latest` (v0.6.0 era) | arm64 | about 22 MB |
+| Metric | Value |
+| ------ | ----- |
+| Central image, local | 56.4 MB |
+| Central image, Hub compressed | about 21 MB per arch |
+| Central RSS, idle | 22.2 MiB |
+| Central CPU, idle | 0.02% |
+| Rust agent binary, release | 1,821,552 bytes (about 1.7 MB) |
 
 The image is already multi-stage: node build plus `python:3.12-alpine` runtime.
-RAM and CPU are not measured yet. No Docker runs on the dev box.
-The new `footprint` CI job prints image size plus RSS plus CPU on every run.
-Use its output as the live baseline.
+The `footprint` job reprints these numbers on every run.
+The `rust-agent` job prints binary size plus parity result on every run.
 
 ## 2. What moved to Rust
 
@@ -36,12 +38,13 @@ Why the agent first:
 3. Build the Rust agent image (`agent-rs/Dockerfile`). Compare sizes.
 4. Run both agents against one central. Compare RSS via `docker stats`.
 
-## 4. Expected gains (honest estimates)
+## 4. Measured gains (agent pilot)
 
-- Rust agent binary: about 2 to 5 MB (rustls embeds crypto).
-- Rust agent image: about 5 to 10 MB on `scratch`.
-- Python agent shares the 21 MB central image. Standalone it needs Python (~15 MB slim).
-- RSS saving: tens of MB per agent host. Matters on tiny nodes only.
+- Rust agent binary: 1.7 MB release (rustls embeds crypto).
+- Rust agent image: about 5 MB on `scratch` (binary plus zero base).
+- Python agent shares the 56 MB central image locally.
+- Parity test passes: push plus rotation plus state file.
+- RSS saving per agent host is real but small. Matters on tiny nodes only.
 - Central rewrite would save more, but costs a full rewrite of 3,044 lines.
 
 ## 5. Risks of a central rewrite
