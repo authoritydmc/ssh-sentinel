@@ -17,7 +17,7 @@ fn file_id(meta: &fs::Metadata) -> u64 {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        meta.file_index().unwrap_or(0)
+        meta.file_index()
     }
     #[cfg(not(any(unix, windows)))]
     {
