@@ -207,11 +207,7 @@ docker compose --profile demo up --build
 # open http://localhost:8081  (sample fleet log, 10 countries, 48h)
 ```
 
-Regenerate the sample data:
-
-```bash
-demo/auth.log.sample is committed and frozen (was seeded, deterministic)
-```
+The sample log is committed and frozen (seeded, deterministic).
 
 ## 🌐 Fleet: central + join N servers (Tailscale recommended)
 
@@ -229,12 +225,15 @@ docker exec ssh-sentinel /srv/ssh-sentinel gentoken web-01
 ROLE=agent AGENT_ID=web-01 CENTRAL_URL=https://<central-tailnet-name>:8079 \
 AGENT_TOKEN=<token> docker compose --profile agent up -d --build
 
-# Option 2 — host systemd agent
+# Option 2 — host systemd agent (Linux, fetches the static binary)
 git clone https://github.com/authoritydmc/ssh-sentinel.git && cd ssh-sentinel
 CENTRAL_URL=http://<central-tailnet-name>:8079 AGENT_TOKEN=<token> sudo -E ./agent/install.sh
 # or without clone: set AGENT_ID explicitly
 CENTRAL_URL=http://central:8079 AGENT_TOKEN=<token> AGENT_ID=web-01 sudo -E ./agent/install.sh
-```
+
+# Option 3 — native binary (macOS, Windows, or any Linux)
+# Download the matching asset from GitHub Releases and run it directly.
+# Linux asset names use x86_64/aarch64, macOS uses the same, Windows adds .exe.
 
 Verify on central:
 

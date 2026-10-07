@@ -81,7 +81,7 @@ sequenceDiagram
 
 Notes:
 
-- The agent resumes from inode plus offset. It survives rotation and restarts.
+- The agent resumes from file identity plus offset. It survives rotation and restarts.
 - The server filters again on ingest. Old agents stay safe.
 - Geo results stay in cache. The cache refreshes in the background.
 
@@ -180,12 +180,33 @@ Rules:
 
 ```mermaid
 flowchart LR
-    DEV["commit to master"] --> CI["ci: lint plus build plus compile"]
-    DEV --> SMK["docker smoke test: open, login, abusers"]
+    DEV["commit to master"] --> CI["ci: frontend, cargo test, smokes, Windows check"]
+    DEV --> SMK["docker smoke test plus UI screenshot plus footprint"]
     SMK --> HUB["push latest and prod SHA to Hub plus GHCR"]
     TAG["tag vX.Y.Z with release script"] --> SEM["semver images X.Y.Z and X.Y"]
+    TAG --> NAT["native binaries for Linux, Windows, macOS"]
     TAG --> REL["GitHub Release, notes from CHANGELOG"]
 ```
 
 Script `scripts/release.sh` updates `VERSION`, moves the
 `Unreleased` section to a versioned section, commits, tags, and pushes.
+Tags are always semver. No date tags exist.
+
+## 10. Artifacts
+
+One tag produces every flavor. Names use Rust target triples.
+
+| Flavor | amd64 (x86_64) | arm64 (aarch64) |
+| ------ | -------------- | --------------- |
+| Docker image | `rajlabs/ssh-sentinel:0.7` | same manifest, both arches |
+| Linux binary | `ssh-sentinel-x86_64-unknown-linux-musl` | `ssh-sentinel-aarch64-unknown-linux-musl` |
+| macOS binary | `ssh-sentinel-x86_64-apple-darwin` | `ssh-sentinel-aarch64-apple-darwin` |
+| Windows binary | `ssh-sentinel-x86_64-pc-windows-msvc.exe` | not built |
+
+Notes:
+
+- `amd64` and `x86_64` name the same arch. Docker uses `amd64`.
+- `arm64` and `aarch64` name the same arch. Docker uses `arm64`.
+- The agent ships the same matrix with the `ssh-sentinel-agent` prefix.
+- `agent/install.sh` fetches the Linux musl asset for its arch.
+- `cargo install --git` builds from source on any Rust host.
