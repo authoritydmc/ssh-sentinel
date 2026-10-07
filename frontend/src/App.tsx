@@ -213,7 +213,17 @@ export default function App() {
           )}
 
           {view === 'attackers' && (
-            <Card title="All attackers" icon={<Crosshair size={15} className="text-[#f85149]" />}>
+            <Card title="All attackers" icon={<Crosshair size={15} className="text-[#f85149]" />}
+              action={<div className="flex gap-2">
+                <button onClick={() => {
+                  const rows = data?.top ?? [];
+                  const csv = 'ip,hits,user,country,city,org\n' + rows.map((t) => [t.ip, t.hits, t.user, t.cc, t.city, `"${(t.org || '').replace(/"/g, "'")}"`].join(',')).join('\n');
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                  a.download = 'ssh-attackers.csv'; a.click();
+                }} className="text-xs text-[#58a6ff] hover:underline">CSV ↓</button>
+                <a href={`/api/blocklist?format=text&min_hits=10&window_h=24${host !== 'all' ? `&host=${encodeURIComponent(host)}` : ''}`} target="_blank" rel="noreferrer" className="text-xs text-[#58a6ff] hover:underline">blocklist ↓</a>
+              </div>}>
               {!data ? <Skeleton className="h-64" /> : <AttackerTable rows={data.top} onIp={setModalIp} full />}
             </Card>
           )}

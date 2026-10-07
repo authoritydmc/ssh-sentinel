@@ -283,6 +283,54 @@ try:
 except ValueError:
     ABUSERS_RPM = 60
 ABUSERS_TTL = 60
+# --- alerting (#25) -------------------------------------------------------
+# ALERT_WEBHOOK_URL: POST JSON {event, ip, user, hits, host, ts} on:
+#   - successful login when ALERT_ON_SUCCESS=1 (default 1 if URL set)
+#   - spike: > ALERT_SPIKE_THRESHOLD fails in ALERT_SPIKE_WINDOW_S (default 20/300)
+# Dedupe: same key resends after ALERT_DEDUPE_S (default 3600). Stdlib only.
+ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+ALERT_ON_SUCCESS = os.environ.get("ALERT_ON_SUCCESS", "1").strip().lower() in ("1", "yes", "true", "on")
+try:
+    ALERT_SPIKE_THRESHOLD = max(2, int(os.environ.get("ALERT_SPIKE_THRESHOLD", "20")))
+except ValueError:
+    ALERT_SPIKE_THRESHOLD = 20
+try:
+    ALERT_SPIKE_WINDOW_S = max(60, int(os.environ.get("ALERT_SPIKE_WINDOW_S", "300")))
+except ValueError:
+    ALERT_SPIKE_WINDOW_S = 300
+try:
+    ALERT_DEDUPE_S = max(60, int(os.environ.get("ALERT_DEDUPE_S", "3600")))
+except ValueError:
+    ALERT_DEDUPE_S = 3600
+_alert_sent = {}
+# --- blocklist (#24) ------------------------------------------------------
+# BLOCK_MODE=log (default): /api/blocklist only, no firewall writes.
+# BLOCK_MODE=nftables: also append repeat offenders to BLOCK_NFT_SET via nft
+#   (dry-run unless BLOCK_DRY_RUN=0). Allowlist: BLOCK_ALLOWLIST (csv) + TRUSTED_IPS + self.
+BLOCK_MODE = os.environ.get("BLOCK_MODE", "log").strip().lower()
+if BLOCK_MODE not in ("log", "nftables"):
+    BLOCK_MODE = "log"
+BLOCK_DRY_RUN = os.environ.get("BLOCK_DRY_RUN", "1").strip().lower() in ("1", "yes", "true", "on")
+BLOCK_NFT_SET = os.environ.get("BLOCK_NFT_SET", "inet filter ssh_blacklist").strip()
+BLOCK_ALLOWLIST = _csv_env("BLOCK_ALLOWLIST")
+try:
+    BLOCK_MIN_HITS = max(2, int(os.environ.get("BLOCK_MIN_HITS", "10")))
+except ValueError:
+    BLOCK_MIN_HITS = 10
+try:
+    BLOCK_WINDOW_H = max(1, min(720, int(os.environ.get("BLOCK_WINDOW_H", "24"))))
+except ValueError:
+    BLOCK_WINDOW_H = 24
+# --- retention + log source (#26) ------------------------------------------
+# LOG_SOURCE=file (default, $AUTH_LOG) | journald (`journalctl _COMM=sshd -o short-iso`).
+# RETENTION_DAYS: prune stored host lines older than N days on push (0=off).
+LOG_SOURCE = os.environ.get("LOG_SOURCE", "file").strip().lower()
+if LOG_SOURCE not in ("file", "journald"):
+    LOG_SOURCE = "file"
+try:
+    RETENTION_DAYS = max(0, min(3650, int(os.environ.get("RETENTION_DAYS", "0"))))
+except ValueError:
+    RETENTION_DAYS = 0
 # Optional in-repo TLS (TLS 1.3 only). Off unless both point at files.
 # Preferred fleet path stays: Tailscale cert on central + https CENTRAL_URL.
 TLS_CERT = os.environ.get("TLS_CERT", "").strip()
@@ -424,8 +472,6 @@ def store_pushed_lines(host, lines):
         if not is_sshd_line(s):
             continue
         kept.append(sanitize_line(s))
-    # If filtering removed everything but input was non-empty, keep nothing
-    # (prevents sudo-only pushes from creating noise). Fall through to meta update.
     with open(p, "a") as f:
         for ln in kept:
             f.write((ln if ln.endswith("\n") else ln + "\n"))
@@ -436,6 +482,12 @@ def store_pushed_lines(host, lines):
     try:
         with open(p) as f:
             all_lines = f.readlines()
+        if RETENTION_DAYS > 0:
+            # Drop lines with parseable timestamps older than the window.
+            cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
+            fresh = [ln for ln in all_lines if (parse_ts(ln, datetime.now()) or cutoff) >= cutoff]
+            # Keep at least the newest 1000 lines so hosts never go empty.
+            all_lines = fresh if len(fresh) >= 1000 else all_lines[-1000:]
         if len(all_lines) > MAX_LINES_PER_HOST:
             with open(p, "w") as f:
                 f.writelines(all_lines[-MAX_LINES_PER_HOST:])
@@ -813,8 +865,18 @@ def _hour_ms(dt):
 
 
 def read_lines(host=None):
-    """Local auth.log, or a joined agent's pushed lines. host='all' merges."""
+    """Local auth.log (or journald), or a joined agent's pushed lines. host='all' merges."""
     if not host or host == HOST_ID:
+        if LOG_SOURCE == "journald":
+            try:
+                import subprocess as _sp
+                r = _sp.run(["journalctl", "_COMM=sshd", "-o", "short-iso", "--no-pager", "-n", "20000"],
+                            capture_output=True, timeout=15, text=True)
+                if r.returncode == 0 and r.stdout:
+                    return [l + "\n" for l in r.stdout.splitlines()]
+            except Exception:
+                pass
+            return []
         try:
             with open(LOG, errors="replace") as f:
                 return f.readlines()
@@ -1010,6 +1072,90 @@ def abusers(host=None):
             "flag": flag(g.get("cc", ""))})
     _abusers_cache.update({"ts": now_t, "host": host, "entries": entries})
     return entries
+
+
+def _alert_send(event, payload):
+    """POST one alert to ALERT_WEBHOOK_URL with dedupe. Returns True if sent."""
+    if not ALERT_WEBHOOK_URL:
+        return False
+    key = event + ":" + str(payload.get("ip", "")) + ":" + str(payload.get("user", ""))
+    if time.time() - _alert_sent.get(key, 0) < ALERT_DEDUPE_S:
+        return False
+    _alert_sent[key] = time.time()
+    try:
+        body = {"event": event, "host": HOST_ID, "ts": int(time.time() * 1000)}
+        body.update(payload)
+        req = urllib.request.Request(
+            ALERT_WEBHOOK_URL, data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json",
+                     "User-Agent": "ssh-sentinel-alert/1.0"})
+        with urllib.request.urlopen(req, timeout=15):
+            pass
+        return True
+    except Exception:
+        _alert_sent.pop(key, None)
+        return False
+
+
+def maybe_alert(summ):
+    """Fire success + spike alerts from a computed summary (best-effort)."""
+    if not ALERT_WEBHOOK_URL:
+        return
+    try:
+        if ALERT_ON_SUCCESS:
+            for e in (summ.get("logins") or [])[-10:]:
+                if e.get("suspicious"):
+                    _alert_send("login.suspicious",
+                                {"ip": e.get("ip"), "user": e.get("user"),
+                                 "reason": e.get("reason")})
+        # Spike: count fails in the recent window from the hourly timeline.
+        now_ms = summ.get("now", int(time.time() * 1000))
+        win_start = now_ms - ALERT_SPIKE_WINDOW_S * 1000
+        recent = sum(f for (h, f, _o) in (summ.get("timeline") or []) if h >= win_start)
+        if recent >= ALERT_SPIKE_THRESHOLD:
+            _alert_send("spike.bruteforce", {"hits": recent,
+                                             "window_s": ALERT_SPIKE_WINDOW_S})
+    except Exception:
+        pass
+
+
+def blocklist(host=None, min_hits=None, window_h=None):
+    """Actionable attacker IPs: abusers() filtered by hits + recency window.
+
+    NEVER includes accepted logins, hostnames, or private/self IPs (inherits
+    abusers() guarantees). In BLOCK_MODE=nftables the caller may also apply
+    BLOCK_NFT_SET via nft (dry-run by default).
+    """
+    min_h = min_hits or BLOCK_MIN_HITS
+    win_h = window_h or BLOCK_WINDOW_H
+    cutoff = int(time.time() * 1000) - win_h * 3600 * 1000
+    out = []
+    for e in abusers(host):
+        if e.get("hits", 0) < min_h:
+            continue
+        if (e.get("last") or 0) < cutoff:
+            continue
+        if e["ip"] in TRUSTED_IPS or e["ip"] in BLOCK_ALLOWLIST:
+            continue
+        out.append(e)
+    return out
+
+
+def _nft_block(ip):
+    """Add ip to BLOCK_NFT_SET. Returns (ok, detail). Dry-run unless BLOCK_DRY_RUN=0."""
+    if BLOCK_MODE != "nftables":
+        return False, "BLOCK_MODE=log (no firewall write)"
+    if ip in TRUSTED_IPS or ip in BLOCK_ALLOWLIST or not is_public_ip(ip):
+        return False, "allowlisted or not public"
+    cmd = ["nft", "add", "element"] + BLOCK_NFT_SET.split() + ["{", ip, "}"]
+    if BLOCK_DRY_RUN:
+        return True, "dry-run: " + " ".join(cmd)
+    try:
+        import subprocess as _sp
+        r = _sp.run(cmd, capture_output=True, timeout=15, text=True)
+        return (r.returncode == 0), (r.stderr.strip()[:200] or "ok")
+    except Exception as e:
+        return False, type(e).__name__
 
 
 def ip_history(ip, lines=None, host=None):
@@ -1213,12 +1359,35 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/summary":
             try:
                 host = (q.get("host", [""])[0] or "")[:64] or None
-                return self._send(json.dumps(summary(host)), "application/json")
+                s = summary(host)
+                maybe_alert(s)
+                return self._send(json.dumps(s), "application/json")
             except Exception as e:
                 return self._send(json.dumps({"error": type(e).__name__}),
                                    "application/json", 500)
         if u.path == "/api/hosts":
             return self._send(json.dumps(list_hosts()), "application/json")
+        if u.path == "/api/blocklist":
+            try:
+                min_h = max(1, min(10000, int(q.get("min_hits", [str(BLOCK_MIN_HITS)])[0])))
+            except ValueError:
+                min_h = BLOCK_MIN_HITS
+            try:
+                win_h = max(1, min(720, int(q.get("window_h", [str(BLOCK_WINDOW_H)])[0])))
+            except ValueError:
+                win_h = BLOCK_WINDOW_H
+            fmt = (q.get("format", ["json"])[0] or "json").lower()
+            host = (q.get("host", [""])[0] or "")[:64] or None
+            entries = blocklist(host, min_h, win_h)
+            if fmt == "text":
+                body = "\n".join(e["ip"] for e in entries) + ("\n" if entries else "")
+                return self._send(body, "text/plain")
+            return self._send(json.dumps({
+                "blocklist": entries, "count": len(entries),
+                "min_hits": min_h, "window_h": win_h,
+                "mode": BLOCK_MODE, "dry_run": BLOCK_DRY_RUN,
+                "host": host or "all", "now": int(time.time() * 1000)}),
+                "application/json")
         if u.path == "/api/ipinfo":
             ip = (q.get("ip", [""])[0] or "")[:45]
             if not ip:
@@ -1337,6 +1506,32 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        if u.path == "/api/alerts/test":
+            _, gate = self._gate()
+            if gate is not None:
+                return self._deny(gate)
+            ok = _alert_send("test.ping", {"msg": "ssh-sentinel test alert"})
+            if not ALERT_WEBHOOK_URL:
+                return self._send(json.dumps({"ok": False,
+                                               "error": "ALERT_WEBHOOK_URL is empty"}),
+                                   "application/json", 400)
+            return self._send(json.dumps({"ok": ok}), "application/json")
+        if u.path == "/api/block":
+            _, gate = self._gate()
+            if gate is not None:
+                return self._deny(gate)
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, OSError):
+                return self._send('{"error":"bad json"}', "application/json", 400)
+            ip = str(body.get("ip", ""))[:45]
+            if not is_public_ip(ip):
+                return self._send('{"error":"not a public IP"}', "application/json", 400)
+            ok, detail = _nft_block(ip)
+            return self._send(json.dumps({"ok": ok, "ip": ip, "detail": detail,
+                                           "mode": BLOCK_MODE}),
+                               "application/json")
         if u.path == "/api/recon":
             _, gate = self._gate()
             if gate is not None:
