@@ -17,7 +17,7 @@ need() {
 MISSING=0
 need git "install git first"
 need docker "install docker for compose deploys"
-need python3 "needed for backend checks"
+need cargo "needed for Rust checks (or use WSL per skills/rust-wsl/SKILL.md)"
 [ "${MISSING:-0}" = 1 ] && echo "fix the missing tools, then re-run." >&2
 
 if [ -d "$DIR/.git" ]; then

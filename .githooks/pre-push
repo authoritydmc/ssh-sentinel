@@ -1,7 +1,14 @@
 #!/bin/sh
-# Full gate before push: backend compile + frontend lint + frontend build.
+# Full gate before push: Rust tests + frontend lint + frontend build.
 set -e
-python3 -m compileall -q backend/server.py agent/agent.py demo/gen_auth_log.py
+if command -v cargo >/dev/null 2>&1 || [ -x "$HOME/.cargo/bin/cargo" ]; then
+  CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
+  command -v cargo >/dev/null 2>&1 && CARGO=cargo
+  "$CARGO" test --manifest-path central-rs/Cargo.toml --quiet
+  "$CARGO" test --manifest-path agent-rs/Cargo.toml --quiet
+else
+  echo "pre-push: skip cargo test (no Rust toolchain; use WSL per skills/rust-wsl/SKILL.md)"
+fi
 (cd frontend && npm run lint --silent)
 (cd frontend && npm run build --silent >/dev/null)
 echo "pre-push: all gates passed"

@@ -49,14 +49,14 @@ One image serves two roles. `ROLE` selects the role.
 
 | ROLE | Process | Inputs | Outputs |
 | ---- | ------- | ------ | ------- |
-| `central` (default) | `server.py` | host log, agent pushes | UI, JSON API, stored JSONL |
-| `agent` | `agent.py` | host log, `CENTRAL_URL`, `AGENT_TOKEN` | filtered log lines to central |
+| `central` (default) | `ssh-sentinel` (central-rs) | host log, agent pushes | UI, JSON API, stored JSONL |
+| `agent` | `ssh-sentinel-agent` (agent-rs) | host log, `CENTRAL_URL`, `AGENT_TOKEN` | filtered log lines to central |
 
 ```mermaid
 flowchart TD
     IMG["image: rajlabs slash ssh-sentinel"] --> E{"ROLE?"}
-    E -->|"central"| S["server.py ThreadingHTTPServer"]
-    E -->|"agent"| G["agent.py tail plus push loop"]
+    E -->|"central"| S["ssh-sentinel Rust binary"]
+    E -->|"agent"| G["ssh-sentinel-agent Rust loop"]
     S --> DIST["React dist"]
     S --> DATA["stored JSONL plus agents.json"]
     G -->|"Bearer push each PUSH_EVERY"| S
@@ -165,7 +165,7 @@ Rules:
 ### 8.2. Fleet on a tailnet
 
 1. Start central on the main server.
-2. Mint a token on central: `server.py gentoken <host>`.
+2. Mint a token on central: `ssh-sentinel gentoken <host>`.
 3. Start an agent on each member with the token.
 4. Check `/api/hosts` on central. All members must show `online`.
 

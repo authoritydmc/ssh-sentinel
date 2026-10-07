@@ -1,5 +1,5 @@
 //! Access control: local Basic, forward proxy headers, OIDC code flow, none.
-//! Fail-closed everywhere. Mirrors backend/server.py gates.
+//! Fail-closed everywhere. Mirrors central-rs gates.
 
 use crate::config::Cfg;
 use crate::db::Db;
@@ -421,7 +421,7 @@ pub fn gate(cfg: &Cfg, db: &Db, req: &Req) -> Gate {
         if !local_configured(cfg, db) {
             return Gate {
                 user: None,
-                deny: Some((401, "setup needed: open Admin setup with the one-time token from DATA_DIR/setup.token or ADMIN_SETUP_TOKEN, POST /api/admin/setup — or set AUTH_USER + AUTH_PASS_HASH (`server.py genhash`)".to_string())),
+                deny: Some((401, "setup needed: open Admin setup with the one-time token from DATA_DIR/setup.token or ADMIN_SETUP_TOKEN, POST /api/admin/setup — or set AUTH_USER + AUTH_PASS_HASH (`ssh-sentinel genhash`)".to_string())),
             };
         }
         return Gate { user: None, deny: Some((401, "login required".to_string())) };

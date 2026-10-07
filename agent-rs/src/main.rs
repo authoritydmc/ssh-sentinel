@@ -1,6 +1,6 @@
 //! ssh-sentinel agent in Rust. Tails AUTH_LOG and pushes new lines.
 //!
-//! Protocol parity with agent/agent.py:
+//! Protocol parity with agent-rs:
 //! env names, state file shape, ship filter, push URL, headers, log text.
 //! One change: a truncated file resets the offset (Python keeps stale offset).
 
@@ -113,6 +113,16 @@ fn trim(s: &str, n: usize) -> String {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
+        println!("ssh-sentinel-agent: tails AUTH_LOG and pushes new lines to central.");
+        println!("Env: CENTRAL_URL AGENT_TOKEN AGENT_ID AUTH_LOG PUSH_EVERY AGENT_STATE SHIP_FILTER.");
+        return;
+    }
+    if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
+        println!("ssh-sentinel-agent {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let central = env("CENTRAL_URL", "http://central:8079").trim_end_matches('/').to_string();
     let token = env("AGENT_TOKEN", "");
     let host = {
@@ -126,7 +136,7 @@ fn main() {
     let filter_name = if full { "full" } else { "sshd-only" };
 
     if token.is_empty() {
-        eprintln!("AGENT_TOKEN is empty — join via central: server.py gentoken {}", host);
+        eprintln!("AGENT_TOKEN is empty — join via central: ssh-sentinel gentoken {}", host);
         std::process::exit(1);
     }
     let mut state = load_state(&state_file);

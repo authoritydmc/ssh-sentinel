@@ -1,5 +1,5 @@
 # SSH Sentinel Rust agent: static musl binary on scratch.
-# Same push protocol as agent/agent.py. Configure via env (see README).
+# Same push protocol as agent-rs. Configure via env (see README).
 FROM rust:1-alpine AS build
 RUN apk add --no-cache musl-dev gcc cmake perl
 WORKDIR /build

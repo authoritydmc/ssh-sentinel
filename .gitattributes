@@ -1,0 +1,15 @@
+# Enforce LF line endings for text files on every platform.
+# Shell scripts break under bash with CRLF. Rust and YAML prefer LF too.
+* text=auto
+*.sh text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+Dockerfile text eol=lf
+.githooks/* text eol=lf
+entrypoint.sh text eol=lf
+install.sh text eol=lf
+*.dockerignore text eol=lf
+*.gitignore text eol=lf
+*.example text eol=lf

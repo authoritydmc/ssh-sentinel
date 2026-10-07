@@ -66,7 +66,7 @@ echo "[4/7] Local-auth gate (fail-closed default)..."
 ACONTAINER="${CONTAINER}-auth"
 AHOST_PORT=$(pick_port)
 [ -z "${AHOST_PORT:-}" ] && AHOST_PORT=18080
-HASH=$(docker run --rm "$IMG" python3 /srv/server.py genhash "smoke-pass" 2>/dev/null | grep -o 'pbkdf2-sha256\$[^ ]*')
+HASH=$(docker run --rm "$IMG" /srv/ssh-sentinel genhash "smoke-pass" 2>/dev/null | grep -o 'pbkdf2-sha256\$[^ ]*')
 [ -z "${HASH:-}" ] && { echo "[FAIL] genhash produced no hash"; exit 1; }
 docker run -d --name "$ACONTAINER" -p "$AHOST_PORT:8079" \
   -e HOST_ID=smoke-auth -e AUTH_LOG=/srv/demo/auth.log.sample \

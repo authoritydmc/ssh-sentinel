@@ -42,6 +42,15 @@ fn dist_dir() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
+        println!("ssh-sentinel central: serves the UI plus JSON API on :8079.");
+        println!("Commands: serve (default) | gentoken <host> | genhash [password] | scrub.");
+        return;
+    }
+    if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
+        println!("ssh-sentinel {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let data_dir = util::env("DATA_DIR", "./data");
     if args.len() >= 3 && args[1] == "gentoken" {
         let host: String = args[2].chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).take(64).collect();

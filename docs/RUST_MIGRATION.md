@@ -15,7 +15,8 @@ Measured in CI on 2026-10-07 (`footprint` job, demo log, idle):
 | Central CPU, idle | 0.02% |
 | Rust agent binary, release | 1,821,552 bytes (about 1.7 MB) |
 
-The image is already multi-stage: node build plus `python:3.12-alpine` runtime.
+The old image was multi-stage: node build plus `python:3.12-alpine` runtime.
+The new image is node build plus cargo build plus `debian-slim` runtime.
 The `footprint` job reprints these numbers on every run.
 The `rust-agent` job prints binary size plus parity result on every run.
 
@@ -55,11 +56,18 @@ Why the agent first:
 - SQLite store plus ban plus report flows need full retesting.
 - Two codebases need dual maintenance during migration.
 
-## 6. Decision gates for Phase 3 (central in Rust)
+## 6. Swap done (central in Rust)
 
-1. Footprint data shows real pain on target hosts.
-2. Rust agent runs clean in production for one release.
-3. Parity harness covers all four auth modes plus abusers safety.
-4. Owner accepts dual maintenance cost.
+The owner approved the full switch. Python is gone from runtime.
 
-Until all four hold, central stays Python.
+- `central-rs` serves the API plus UI. Same routes, same DB schema.
+- `agent-rs` ships logs. Static musl binary in GitHub Releases.
+- The image holds no Python and no build tools.
+- Parity was proven before the swap (Python versus Rust diff, all green).
+- Post-swap safety comes from `cargo test` plus `smoke-central.sh` in CI.
+
+## 7. New numbers after the swap
+
+Read the `footprint` job summary on `master` after merge.
+It prints the Rust image size plus RSS plus CPU.
+Compare with the 56.4 MB plus 22.2 MiB baseline above.

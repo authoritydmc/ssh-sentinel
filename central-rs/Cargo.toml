@@ -2,7 +2,7 @@
 name = "ssh-sentinel"
 version = "0.1.0"
 edition = "2021"
-description = "SSH Sentinel central in Rust. Full parity with backend/server.py."
+description = "SSH Sentinel central in Rust. Full parity with central-rs."
 license = "MIT"
 
 [[bin]]

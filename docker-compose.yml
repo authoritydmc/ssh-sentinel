@@ -67,7 +67,7 @@ services:
       # Production: live host log. Demo profile overrides with the sample file.
       - /var/log/auth.log:/var/log/auth.log:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8079/healthz >/dev/null || python3 -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8079/healthz').read()\""]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8079/healthz | grep -q ok"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -109,7 +109,7 @@ services:
     command: python3 ./sf.py -l 0.0.0.0:5001
 
   # Agent mode: same image, ships this host's log to central. Needs a join
-  # token first (on central: server.py gentoken <host>), then:
+  # token first (on central: ssh-sentinel gentoken <host>), then:
   #   ROLE=agent AGENT_ID=web-01 CENTRAL_URL=https://<central-tailnet>:8079 \
   #   AGENT_TOKEN=<token> docker compose --profile agent up -d --build
   agent:

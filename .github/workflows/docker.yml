@@ -35,6 +35,11 @@ jobs:
           chmod +x scripts/footprint.sh
           bash scripts/footprint.sh
 
+      - name: Build standalone Rust agent image
+        run: |
+          docker build -f agent-rs/Dockerfile -t ssh-sentinel-agent-rs:test .
+          docker images ssh-sentinel-agent-rs:test --format "agent image size: {{.Size}}"
+
   build:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
