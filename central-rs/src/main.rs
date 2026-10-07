@@ -171,7 +171,7 @@ fn serve() {
         let s = state.clone();
         std::thread::spawn(move || ops::ops_loop(s));
     }
-    ops::geo_prime(&state);
+    // Geo warms in the background (geo_loop primes first). Serving starts now.
     let eff = config::Eff { db: &state.db };
     println!("ops: bans auto={} threshold={}/{}s jail={} reports={} provider={}",
         eff.ban_auto(), eff.ban_threshold(), eff.ban_window(), eff.ban_jail(),
