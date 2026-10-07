@@ -9,6 +9,8 @@ over your tailnet, central aggregates. SQLite holds derived state. Logs stay sou
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Stack](https://img.shields.io/badge/frontend-React19%20%2B%20Tailwind4-58a6ff)
 ![Backend](https://img.shields.io/badge/backend-Rust-f74c00)
+![crates.io](https://img.shields.io/crates/v/ssh-sentinel)
+![agent](https://img.shields.io/crates/v/ssh-sentinel-agent)
 ![ci](https://github.com/authoritydmc/ssh-sentinel/actions/workflows/ci.yml/badge.svg)
 ![docker](https://github.com/authoritydmc/ssh-sentinel/actions/workflows/docker.yml/badge.svg)
 ![release](https://github.com/authoritydmc/ssh-sentinel/actions/workflows/release.yml/badge.svg)
