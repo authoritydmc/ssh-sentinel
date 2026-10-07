@@ -126,7 +126,7 @@ fn scrub(data_dir: &str) {
                     let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
                 }
                 let meta = serde_json::json!({"host": fn_.trim_end_matches(".jsonl"), "last_seen": clock_secs() as f64, "lines": tail.len()}).to_string();
-                let _ = std::fs::write(p + ".meta", meta);
+                let _ = std::fs::write(format!("{}/{}.meta", hdir, fn_.trim_end_matches(".jsonl")), meta);
                 kept_n += tail.len() as i64;
                 dropped_n += dropped;
                 println!("{}: kept {}, dropped {}", fn_, tail.len(), dropped);
