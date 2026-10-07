@@ -98,5 +98,5 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish --locked -p ssh-sentinel-agent
-          cargo publish --locked -p ssh-sentinel
+          cargo publish -p ssh-sentinel-agent
+          cargo publish -p ssh-sentinel
