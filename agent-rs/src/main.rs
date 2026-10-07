@@ -7,22 +7,22 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::time::Duration;
 
-/// Stable file identity across rotation. Inode on Unix, file index on Windows.
+/// Stable file identity across rotation. Inode on Unix, mtime nanos on
+/// Windows (std has no stable file index there). A mismatch reships
+/// from zero, which is always safe.
 fn file_id(meta: &fs::Metadata) -> u64 {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         meta.ino()
     }
-    #[cfg(windows)]
+    #[cfg(not(unix))]
     {
-        use std::os::windows::fs::MetadataExt;
-        meta.file_index()
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = meta;
-        0
+        meta.modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
     }
 }
 
