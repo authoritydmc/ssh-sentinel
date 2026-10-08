@@ -7,7 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.7.4] - 2026-10-07
 
+### Fixed
+- Release publishing works without the cargo lock flag; crates.io docs badges.
+
 ## [0.7.3] - 2026-10-07
+
+### Added
+- CI asserts a pushing agent shows online (covers the 0.7.2 meta-path fix).
+- Docs: release flow, artifact matrix, fleet options, masked gallery screenshots.
+- Both crates publish to crates.io on tags.
 
 ## [0.7.2] - 2026-10-07
 
