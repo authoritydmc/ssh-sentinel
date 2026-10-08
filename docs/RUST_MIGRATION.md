@@ -100,3 +100,21 @@ image is tiny. RAM wins. Image size does not.
 To shrink the image next: replace `debian-slim` with a smaller
 base that still ships `getent` for rDNS, or drop the PTR lookup.
 That choice is open. It needs its own test round.
+
+
+## 8. Production snapshot (sanitized, v0.7.4)
+
+Live two-host fleet, central plus one remote agent. No host names,
+addresses, URLs, or tokens are recorded here on purpose.
+
+| Metric | Value |
+| ------ | ----- |
+| Central CPU, loaded | 0.00% |
+| Central RSS, loaded | about 42 MiB (256 MiB container limit) |
+| Load at measure time | about 9 MB auth log, 2 hosts, 260+ geo entries cached, 500+ tracked IPs |
+| Agent RSS | about 0.8 MiB (Python shipper: 4.7 MiB, 17.5 MiB peak) |
+| `GET /api/summary` | 1-5 ms (Python era: 7-58 ms, measured on a smaller log) |
+
+Read it as: image got fatter (Alpine plus Python beat slim plus Rust
+on bytes), runtime got leaner everywhere else. Idle CI numbers above
+stay the reference for cross-version comparison.
