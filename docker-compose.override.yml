@@ -1,0 +1,20 @@
+services:
+  central:
+    ports:
+      - "127.0.0.1:18079:8079"
+    mem_limit: 256m
+    networks:
+      - backend
+      - coolify
+    volumes:
+      - backend-dev_sentinel_data:/srv/data
+networks:
+  backend:
+    external: true
+    name: dev-backend-network
+  coolify:
+    external: true
+    name: coolify
+volumes:
+  backend-dev_sentinel_data:
+    external: true
