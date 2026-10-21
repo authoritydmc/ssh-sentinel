@@ -26,7 +26,7 @@ jobs:
           SHOT_PATH=/tmp/ui-shot.png ./test_docker.sh
 
       - name: Upload dashboard screenshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ui-shot
           path: /tmp/ui-shot.png
