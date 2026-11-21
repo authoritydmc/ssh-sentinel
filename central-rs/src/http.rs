@@ -496,7 +496,7 @@ pub fn handle(state: &State, req: &Req) -> Resp {
     let g = gate_of(state, req);
     if let Some(d) = g.deny.clone() {
         if state.cfg.auth_mode == "local" && d.0 == 401
-            && !["/api/summary", "/api/hosts", "/api/ipinfo", "/api/tail"].contains(&req.path.as_str())
+            && !["/api/summary", "/api/hosts", "/api/ipinfo", "/api/tail", "/api/bans"].contains(&req.path.as_str())
         {
             let mut r = Resp::text(401, "text/html", b"<h1>401 login required</h1>".to_vec());
             r.headers.push(("WWW-Authenticate".to_string(), "Basic realm=\"ssh-sentinel\"".to_string()));
@@ -506,6 +506,9 @@ pub fn handle(state: &State, req: &Req) -> Resp {
     }
     let actor = g.user.unwrap_or_else(|| "admin".to_string());
     if req.method == "GET" && req.path == "/api/admin/bans" {
+        return Resp::json(200, &serde_json::json!({"bans": stats::ban_list_active(&state.db)}));
+    }
+    if req.method == "GET" && req.path == "/api/bans" {
         return Resp::json(200, &serde_json::json!({"bans": stats::ban_list_active(&state.db)}));
     }
     if req.method == "GET" && req.path == "/api/admin/config" {

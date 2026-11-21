@@ -5,7 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [0.7.4] - 2026-10-07
+## [0.7.5] - 2026-11-21
+
+### Added
+- Prominent **Banned IPs** section on the main dashboard and navigation bar with active ban count badge.
+- Summary API (`/api/summary`) and dedicated public endpoint (`/api/bans`) expose active ban details (jail, reason, source, created, expires, fail2ban firewall status).
+- CSV export capability for banned IP records directly from the Banned IPs view.
+- Clickable banned IPs that directly open the Attacker Intel modal for quick inspection or action.
 
 ### Fixed
 - Release publishing works without the cargo lock flag; crates.io docs badges.

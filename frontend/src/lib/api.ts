@@ -17,6 +17,8 @@ export interface Summary {
   suspicious_count: number; privacy_mode: string; trusted_configured: boolean;
   excluded_self: number; self_ips: string[]; geo_cached: number; now: number;
   host: string; hosts: Host[];
+  bans?: BanEntry[];
+  ban_count?: number;
 }
 export interface IpIntel {
   ip: string; cc?: string; country?: string; city?: string; org?: string; isp?: string;
@@ -103,6 +105,8 @@ export const fetchEnforcement = () => get<EnforcementConfig>('admin/config');
 export const postEnforcement = (patch: Record<string, string | number | boolean>) =>
   post<{ updated: Record<string, unknown>; skipped: Record<string, string>; config: EnforcementConfig }>('admin/config', patch);
 export const fetchBans = async (): Promise<BanEntry[]> =>
+  (await get<{ bans: BanEntry[] }>('bans')).bans;
+export const fetchAdminBans = async (): Promise<BanEntry[]> =>
   (await get<{ bans: BanEntry[] }>('admin/bans')).bans;
 export const fetchActivity = async (limit = 200): Promise<ActivityEntry[]> =>
   (await get<{ activity: ActivityEntry[] }>(`admin/activity?limit=${limit}`)).activity;

@@ -1,5 +1,5 @@
 import {
-  Activity, AlertTriangle, CheckCircle2, ChevronLeft, Crosshair, Eye, GitBranch, Globe2,
+  Activity, AlertTriangle, Ban, CheckCircle2, ChevronLeft, Crosshair, Eye, GitBranch, Globe2,
   LayoutDashboard, ListOrdered, Map as MapIcon, Pause, Play, Radio, Search,
   Server, ShieldAlert, ShieldCheck, ShieldHalf, Users,
 } from 'lucide-react';
@@ -15,12 +15,12 @@ const AttackerModal = lazy(() => import('./components/AttackerModal'));
 const VersionModal = lazy(() => import('./components/VersionModal'));
 import SignIn from './components/SignIn';
 import { eventTone, } from './components/ui';
-import { REPO_URL, TZ, fetchAuth, fetchSelf, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type Host, type SelfInfo, type Summary } from './lib/api';
+import { REPO_URL, TZ, fetchAuth, fetchSelf, fetchSummary, fetchTail, fmtClock, fmtT, relT, type AuthInfo, type BanEntry, type Host, type SelfInfo, type Summary } from './lib/api';
 import { MaskProvider, maskHost, maskIp, maskLine, maskLoginIp, maskUser, useMask } from './components/Mask';
 import { EyeOff } from 'lucide-react';
 import { clsx } from 'clsx';
 
-type View = 'overview' | 'attackers' | 'events' | 'admin';
+type View = 'overview' | 'attackers' | 'bans' | 'events' | 'admin';
 
 function useSummary(host: string) {
   const [data, setData] = useState<Summary | null>(null);
@@ -41,9 +41,10 @@ function useSummary(host: string) {
   return { data, err, updated, switching };
 }
 
-const NAV: { id: View; label: string; icon: React.ReactNode }[] = [
+const NAV: { id: View; label: string; icon: React.ReactNode; badgeKey?: 'ban_count' }[] = [
   { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={17} /> },
   { id: 'attackers', label: 'Attackers', icon: <Crosshair size={17} /> },
+  { id: 'bans', label: 'Banned IPs', icon: <Ban size={17} />, badgeKey: 'ban_count' },
   { id: 'events', label: 'Live events', icon: <Activity size={17} /> },
   { id: 'admin', label: 'Admin', icon: <ShieldHalf size={17} /> },
 ];
@@ -138,6 +139,11 @@ function Shell() {
               className={clsx('flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all',
                 view === n.id ? 'bg-[#58a6ff]/15 text-white ring-1 ring-inset ring-[#58a6ff]/40' : 'text-[#8b98ad] hover:bg-white/5 hover:text-white')}>
               {n.icon}{!collapsed && <span className="font-medium">{n.label}</span>}
+              {!collapsed && n.badgeKey && (data?.[n.badgeKey] ?? 0) > 0 && (
+                <span className="ml-auto rounded-full bg-[#f85149]/20 px-2 py-0.5 text-[11px] font-semibold text-[#ff9d97] ring-1 ring-inset ring-[#f85149]/40">
+                  {data?.[n.badgeKey]}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -213,9 +219,10 @@ function Shell() {
             <>
               {!data ? <OverviewSkeleton /> : (
                 <>
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
                     <MetricCard icon={<AlertTriangle size={16} />} label="Failed attempts" value={data.total.toLocaleString()} sub={`+${data.excluded_self.toLocaleString()} self excluded`} tone="bad" />
                     <MetricCard icon={<Globe2 size={16} />} label="Attacker IPs" value={data.ips} sub={`${data.geo_cached} geo-located`} tone="acc" />
+                    <MetricCard icon={<Ban size={16} />} label="Active Bans" value={data.ban_count ?? data.bans?.length ?? 0} sub="fail2ban & sentinel" tone={(data.ban_count ?? 0) > 0 ? 'bad' : undefined} />
                     <MetricCard icon={<CheckCircle2 size={16} />} label="Successful logins" value={data.logins.length} sub={(data.suspicious_count ?? 0) > 0 ? `${data.suspicious_count} SUSPICIOUS — review` : 'last 60 in range · usernames masked'} tone={(data.suspicious_count ?? 0) > 0 ? 'bad' : 'ok'} />
                     <MetricCard icon={<Activity size={16} />} label="Peak hour" value={`${stats!.peak[1]}/h`} sub="48h window" tone="warn" />
                     <MetricCard icon={<MapIcon size={16} />} label="Top origin" value={`${stats!.topcc.flag ? `${stats!.topcc.flag} ` : ''}${stats!.topcc.cc}`} sub={`${stats!.topcc.country} · ${stats!.topcc.hits} hits`} tone="acc" />
@@ -253,6 +260,12 @@ function Shell() {
                     action={<button onClick={() => setView('attackers')} className="text-xs text-[#58a6ff] hover:underline">view all →</button>}>
                     <AttackerTable rows={data.top.slice(0, 8)} onIp={setModalIp} />
                   </Card>
+                  {(data.bans && data.bans.length > 0) && (
+                    <Card title={`Active Banned IPs (${data.bans.length})`} icon={<Ban size={15} className="text-[#f85149]" />}
+                      action={<button onClick={() => setView('bans')} className="text-xs text-[#58a6ff] hover:underline">view all bans →</button>}>
+                      <BansTable bans={data.bans.slice(0, 8)} onIp={setModalIp} />
+                    </Card>
+                  )}
                   <Card title="Recent logins (Accepted — usernames masked)" icon={<CheckCircle2 size={15} className="text-[#3fb950]" />}>
                     <LoginTable logins={data.logins} onIp={setModalIp} />
                   </Card>
@@ -274,6 +287,21 @@ function Shell() {
                 }} className="text-xs text-[#58a6ff] hover:underline">CSV ↓</button>
               )}>
               {!data ? <Skeleton className="h-64" /> : <AttackerTable rows={data.top} onIp={setModalIp} full />}
+            </Card>
+          )}
+
+          {view === 'bans' && (
+            <Card title={`Active Banned IPs (${data?.bans?.length ?? 0})`} icon={<Ban size={15} className="text-[#f85149]" />}
+              action={!data?.bans ? undefined : (
+                <button onClick={() => {
+                  const csv = 'ip,jail,reason,source,created,expires,fail2ban\n' + data.bans!.map((b) =>
+                    [b.ip, b.jail, `"${(b.reason || '').replace(/"/g, "'")}"`, b.source, b.created ? new Date(b.created).toISOString() : '', b.expires ? new Date(b.expires).toISOString() : '', b.fail2ban_ok ? 'yes' : 'no'].join(',')).join('\n');
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                  a.download = 'ssh-bans.csv'; a.click();
+                }} className="text-xs text-[#58a6ff] hover:underline">CSV ↓</button>
+              )}>
+              {!data ? <Skeleton className="h-64" /> : <BansTable bans={data.bans ?? []} onIp={setModalIp} full />}
             </Card>
           )}
 
@@ -615,6 +643,84 @@ function SuspiciousBanner({ logins, onIp }: { logins: Summary['logins']; onIp: (
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function BansTable({ bans, onIp, full = false }: { bans: BanEntry[]; onIp: (ip: string) => void; full?: boolean }) {
+  const { masked } = useMask();
+  const [filter, setFilter] = useState('');
+  const filtered = useMemo(() => {
+    if (!filter.trim()) return bans;
+    const q = filter.toLowerCase();
+    return bans.filter((b) => b.ip.toLowerCase().includes(q) || b.reason.toLowerCase().includes(q) || b.jail.toLowerCase().includes(q) || b.source.toLowerCase().includes(q));
+  }, [bans, filter]);
+
+  if (bans.length === 0) return <Empty>No active bans recorded.</Empty>;
+
+  return (
+    <div className="space-y-3">
+      {full && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-52 flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b98ad]" />
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="filter banned IPs, reason, or jail…"
+              className="w-full rounded-xl border border-[#1e2a3f] bg-black/30 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-[#5b6b82] focus:border-[#58a6ff]/60"
+            />
+          </div>
+          <span className="text-xs text-[#8b98ad]">{filtered.length} of {bans.length} bans</span>
+        </div>
+      )}
+      <div className="scroll-thin overflow-x-auto">
+        <table className="w-full min-w-[700px] text-sm">
+          <thead>
+            <tr className="text-left text-xs text-[#8b98ad]">
+              <th className="pb-2 pr-3 font-medium">Banned IP</th>
+              <th className="pb-2 pr-3 font-medium">Jail</th>
+              <th className="pb-2 pr-3 font-medium">Source</th>
+              <th className="pb-2 pr-3 font-medium">Reason</th>
+              <th className="pb-2 pr-3 font-medium">Created</th>
+              <th className="pb-2 pr-3 font-medium">Expires</th>
+              <th className="pb-2 font-medium">Firewall Block</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((b) => (
+              <tr key={b.ip} className="border-t border-[#1e2a3f] hover:bg-white/[0.02]">
+                <td className="py-2 pr-3 font-mono">
+                  <button onClick={() => onIp(b.ip)} className="text-[#a5d6ff] hover:underline">
+                    {maskIp(b.ip, masked)}
+                  </button>
+                </td>
+                <td className="py-2 pr-3 text-xs text-[#8b98ad] font-mono">{b.jail || 'sshd'}</td>
+                <td className="py-2 pr-3">
+                  <Badge tone={b.source === 'auto' ? 'warn' : b.source === 'fail2ban' ? 'ok' : 'info'}>
+                    {b.source}
+                  </Badge>
+                </td>
+                <td className="py-2 pr-3 text-xs text-[#c4cfdf] max-w-[200px] truncate" title={b.reason}>
+                  {b.reason || '—'}
+                </td>
+                <td className="py-2 pr-3 text-xs text-[#8b98ad]">{b.created ? fmtT(b.created) : '—'}</td>
+                <td className="py-2 pr-3 text-xs text-[#8b98ad]" title={b.expires ? fmtT(b.expires) : undefined}>
+                  {b.expires ? relT(b.expires) : 'indefinite'}
+                </td>
+                <td className="py-2">
+                  {b.fail2ban_ok ? (
+                    <Badge tone="ok">firewall active</Badge>
+                  ) : (
+                    <Badge tone="dim" title="Monitor only">monitor</Badge>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && <Empty>No bans matching filter.</Empty>}
       </div>
     </div>
   );

@@ -193,10 +193,14 @@ pub fn summary(ctx: &Ctx, host: Option<&str>) -> serde_json::Value {
     let sus_n = enriched.iter().filter(|e| e.get("suspicious").and_then(|x| x.as_bool()).unwrap_or(false)).count();
     let total: i64 = per_ip.m.values().map(|(c, _)| *c).sum();
     let start = enriched.len().saturating_sub(60);
+    let active_bans = ban_list_active(ctx.db);
+    let ban_count = active_bans.len();
     serde_json::json!({
         "total": total, "ips": per_ip.m.len(), "top": top, "timeline": tl,
         "logins": &enriched[start..],
         "suspicious_count": sus_n,
+        "bans": active_bans,
+        "ban_count": ban_count,
         "privacy_mode": if ctx.cfg.privacy_off { "off" } else if strict { "strict" } else { "balanced" },
         "trusted_configured": !t_ips.is_empty() || !t_users.is_empty(),
         "excluded_self": skip_self, "excluded_whitelisted": skip_white,
